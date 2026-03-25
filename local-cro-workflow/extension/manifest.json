@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Local CRO Bridge",
+  "version": "1.0",
+  "description": "Bridges local file changes to the active tab via WebSockets.",
+  "permissions": [
+    "scripting",
+    "tabs",
+    "storage",
+    "cookies",
+    "declarativeNetRequest",
+    "alarms"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Local CRO Bridge"
+  },
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content_logger.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "csp_bypass",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "local-cro-workflow",
+  "version": "1.0.0",
+  "description": "Local CRO bridge for Kameleoon testing",
+  "type": "module",
+  "main": "daemon/server.js",
+  "scripts": {
+    "start": "node cli/bin/cro-agent.js"
+  },
+  "bin": {
+    "cro-agent": "./cli/bin/cro-agent.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "chokidar": "^4.0.0",
+    "ws": "^8.16.0",
+    "zod": "^3.22.4"
+  }
+}
