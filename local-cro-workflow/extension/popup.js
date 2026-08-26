@@ -1,13 +1,13 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const toggle = document.getElementById('toggle-enabled');
   const daemonBadge = document.getElementById('daemon-badge');
-  const workspaceName = document.getElementById('workspace-name');
-  const workspacePath = document.getElementById('workspace-path');
-  const fileList = document.getElementById('file-list');
-  const tabList = document.getElementById('tab-list');
-  const workspaceCard = document.getElementById('workspace-card');
-  const filesCard = document.getElementById('files-card');
-  const injectionsCard = document.getElementById('injections-card');
+  const targetingCard = document.getElementById('targeting-card');
+  const targetingBadge = document.getElementById('targeting-badge');
+  const targetingLabel = document.getElementById('targeting-label');
+  const targetTabBtn = document.getElementById('target-tab-btn');
+  const targetInfo = document.getElementById('target-info');
+  const targetInfoText = document.getElementById('target-info-text');
+  const targetClearBtn = document.getElementById('target-clear-btn');
 
 
   // Initial State Load
@@ -23,72 +23,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({ type: 'TOGGLE_ENABLED', enabled });
   });
 
+  targetTabBtn.addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return;
+    chrome.runtime.sendMessage({ type: 'SET_TARGET_TAB', tabId: tab.id }, () => {
+      refreshUI();
+    });
+  });
+
+  targetClearBtn.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'CLEAR_TARGET_TAB' }, () => {
+      refreshUI();
+    });
+  });
+
   async function refreshUI() {
     chrome.runtime.sendMessage({ type: 'GET_DETAILED_STATE' }, (response) => {
       if (!response) return;
 
-      const { isEnabled, connectionStatus, currentState, injectedTabs } = response;
-      
+      const { isEnabled, connectionStatus, targetingResult, targetTab } = response;
+
       toggle.checked = isEnabled;
-      const isConnected = connectionStatus === 'connected';
       updateHeaderUI(connectionStatus);
 
-      // Hide/Show sections based on state
-      const shouldShowActiveInfo = isEnabled && isConnected;
-      const displayStyle = shouldShowActiveInfo ? 'block' : 'none';
-      workspaceCard.style.display = displayStyle;
-      filesCard.style.display = displayStyle;
-      injectionsCard.style.display = displayStyle;
-
-      if (!shouldShowActiveInfo) return;
-      if (currentState.workspaceName) {
-        workspaceName.textContent = currentState.workspaceName;
-        workspacePath.textContent = currentState.workspacePath;
+      if (targetTab) {
+        targetInfo.style.display = 'block';
+        targetInfoText.textContent = targetTab.title || targetTab.url;
+        targetInfoText.title = targetTab.url;
+      } else {
+        targetInfo.style.display = 'none';
       }
 
+      const isConnected = connectionStatus === 'connected';
+      targetingCard.style.display = isEnabled && isConnected ? 'block' : 'none';
 
-
-      // Update Files
-      if (currentState.files && currentState.files.length > 0) {
-        fileList.innerHTML = currentState.files.map(file => `
-          <li class="file-item">
-            <span class="file-icon">📄</span>
-            <span>${file}</span>
-          </li>
-        `).join('');
+      if (targetingResult === null) {
+        targetingBadge.textContent = 'N/A';
+        targetingBadge.className = 'status-badge status-disconnected';
+        targetingLabel.textContent = 'No targeting condition set';
+      } else if (targetingResult === true) {
+        targetingBadge.textContent = 'TRUE';
+        targetingBadge.className = 'status-badge status-active';
+        targetingLabel.textContent = 'Visitor is included';
+      } else if (targetingResult === false) {
+        targetingBadge.textContent = 'FALSE';
+        targetingBadge.className = 'status-badge status-disabled';
+        targetingLabel.textContent = 'Visitor is excluded';
       } else {
-        fileList.innerHTML = '<li class="empty-state">No files tracked</li>';
-      }
-
-      // Update Tabs
-      if (injectedTabs && injectedTabs.length > 0) {
-        // Sort by last injected time desc
-        const sortedTabs = [...injectedTabs].sort((a, b) => b.lastInjected - a.lastInjected);
-        tabList.innerHTML = sortedTabs.map(tab => `
-          <li class="tab-item">
-            <span class="tab-icon">🌐</span>
-            <div class="tab-info">
-              <span class="tab-title" title="${tab.title}">${tab.title}</span>
-              <span class="tab-url" title="${tab.url}">${new URL(tab.url).hostname}</span>
-            </div>
-          </li>
-        `).join('');
-      } else {
-        tabList.innerHTML = '<li class="empty-state">No active injections</li>';
+        targetingBadge.textContent = '—';
+        targetingBadge.className = 'status-badge status-connecting';
+        targetingLabel.textContent = 'Evaluating…';
       }
     });
   }
 
   function updateHeaderUI(connectionStatus) {
-
     if (connectionStatus === 'connected') {
-      daemonBadge.textContent = 'Daemon: On';
+      daemonBadge.textContent = 'Online';
       daemonBadge.className = 'status-badge status-active';
     } else if (connectionStatus === 'connecting') {
-      daemonBadge.textContent = 'Daemon: ...';
+      daemonBadge.textContent = 'Connecting';
       daemonBadge.className = 'status-badge status-connecting';
     } else {
-      daemonBadge.textContent = 'Daemon: Off';
+      daemonBadge.textContent = 'Offline';
       daemonBadge.className = 'status-badge status-disconnected';
     }
   }

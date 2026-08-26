@@ -39,7 +39,7 @@ export function initWebSocketServer(port = 5678) {
           replyCurrentFiles(ws, data.tabId);
         } else if (data.type === 'status_result') {
           handleStatusResult(data);
-        } else if (['evaluate_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result'].includes(data.type)) {
+        } else if (['evaluate_result', 'click_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result', 'open_url_result', 'dom_result', 'viewport_result', 'network_result', 'clear_emulation_result', 'set_enabled_result', 'response_headers_result', 'lifecycle_timeline_result'].includes(data.type)) {
           handleExtensionResult(data);
         }
       } catch (err) {
@@ -102,18 +102,29 @@ function sendExtensionRequest(event, payload = {}, timeoutMs = 5000, waitForConn
 export function handleExtensionResult(data) {
   const pending = pendingEvaluations.get(data.messageId);
   if (pending) {
-    clearTimeout(pending.timeout);
-    pendingEvaluations.delete(data.messageId);
     if (data.error) {
-      pending.reject(new Error(data.error));
+      // Don't reject immediately if other clients may still respond successfully
+      pending.errorCount = (pending.errorCount || 0) + 1;
+      const clientCount = wss ? wss.clients.size : 1;
+      if (pending.errorCount >= clientCount) {
+        clearTimeout(pending.timeout);
+        pendingEvaluations.delete(data.messageId);
+        pending.reject(new Error(data.error));
+      }
     } else {
+      clearTimeout(pending.timeout);
+      pendingEvaluations.delete(data.messageId);
       pending.resolve(data.result);
     }
   }
 }
 
-export function evaluateJs(code, timeoutMs = 5000) {
-  return sendExtensionRequest('evaluate_js', { code }, timeoutMs);
+export function evaluateJs(code, timeoutMs = 5000, tabId = null) {
+  return sendExtensionRequest('evaluate_js', { code, targetTabId: tabId }, timeoutMs);
+}
+
+export function clickElement(selector, tabId = null, offsetX = 0, offsetY = 0, timeoutMs = 5000) {
+  return sendExtensionRequest('click_element', { selector, targetTabId: tabId, offsetX, offsetY }, timeoutMs);
 }
 
 export function toggleSimulation(enable) {
@@ -123,16 +134,16 @@ export function toggleSimulation(enable) {
   });
 }
 
-export function captureScreenshot(timeoutMs = 10000) {
-  return sendExtensionRequest('capture_screenshot', {}, timeoutMs);
+export function captureScreenshot(rect = null, timeoutMs = 10000, tabId = null) {
+  return sendExtensionRequest('capture_screenshot', { rect, targetTabId: tabId }, timeoutMs);
 }
 
-export function reloadPage() {
-  broadcast({ event: 'reload_page' });
+export function reloadPage(tabId = null) {
+  broadcast({ event: 'reload_page', payload: { targetTabId: tabId } });
 }
 
-export function activateTab(tabId, timeoutMs = 5000) {
-  return sendExtensionRequest('activate_tab', { tabId }, timeoutMs);
+export function activateTab(tabId, timeoutMs = 5000, setTarget = false) {
+  return sendExtensionRequest('activate_tab', { tabId, setTarget }, timeoutMs);
 }
 
 let currentWorkspace = process.cwd();
@@ -150,6 +161,7 @@ export function getStatus(timeoutMs = 5000) {
       daemon: {
         status: 'online',
         port: 5678,
+        pid: process.pid,
         connectedExtensions: clientsCount,
         workspace: currentWorkspace,
         files: getFiles(),
@@ -181,6 +193,14 @@ export function getStatus(timeoutMs = 5000) {
         if (results.length === clientsCount) {
           clearTimeout(timeout);
           status.extensions = results;
+          if (clientsCount > 1) {
+            const enabledCount = results.filter(r => r.isEnabled).length;
+            if (enabledCount > 1) {
+              status.warning = `⚠️  ${enabledCount} of ${clientsCount} connected extensions report isEnabled:true — this causes a race condition where the disabled extension's error response wins. Disable all but one extension instance.`;
+            } else {
+              status.warning = `⚠️  ${clientsCount} extensions connected — only the enabled one will handle requests. Stale connections from disabled extensions may still interfere if the isEnabled guard is missing.`;
+            }
+          }
           resolve(status);
         }
       }, 
@@ -206,10 +226,38 @@ export function listTabs(timeoutMs = 5000) {
   return sendExtensionRequest('list_tabs', {}, timeoutMs);
 }
 
-export function readMutationLog(timeoutMs = 5000) {
-  return sendExtensionRequest('read_mutation_log', {}, timeoutMs, false);
+export function readMutationLog(timeoutMs = 5000, tabId = null) {
+  return sendExtensionRequest('read_mutation_log', { targetTabId: tabId }, timeoutMs, false);
 }
 
-export function clearMutationLog(timeoutMs = 5000) {
-  return sendExtensionRequest('clear_mutation_log', {}, timeoutMs, false);
+export function clearMutationLog(timeoutMs = 5000, tabId = null) {
+  return sendExtensionRequest('clear_mutation_log', { targetTabId: tabId }, timeoutMs, false);
+}
+
+export function openUrl(url, timeoutMs = 10000) {
+  return sendExtensionRequest('open_url', { url }, timeoutMs);
+}
+
+export function setViewport(width, height, mobile = false, tabId = null, timeoutMs = 5000) {
+  return sendExtensionRequest('set_viewport', { width, height, mobile, targetTabId: tabId }, timeoutMs);
+}
+
+export function emulateNetwork(conditions, tabId = null, timeoutMs = 5000) {
+  return sendExtensionRequest('emulate_network', { ...conditions, targetTabId: tabId }, timeoutMs);
+}
+
+export function clearEmulation(tabId = null, timeoutMs = 5000) {
+  return sendExtensionRequest('clear_emulation', { targetTabId: tabId }, timeoutMs);
+}
+
+export function setExtensionEnabled(enabled, timeoutMs = 5000) {
+  return sendExtensionRequest('set_enabled', { enabled }, timeoutMs);
+}
+
+export function readResponseHeaders(url = null, tabId = null, requestContext = 'top-level', includeSubresources = false, urlFilter = null, timeoutMs = 15000) {
+  return sendExtensionRequest('read_response_headers', { url, targetTabId: tabId, requestContext, includeSubresources, urlFilter }, timeoutMs);
+}
+
+export function captureLifecycleTimeline(spec = {}, tabId = null, timeoutMs = 20000) {
+  return sendExtensionRequest('arm_lifecycle_capture', { ...spec, targetTabId: tabId }, timeoutMs);
 }

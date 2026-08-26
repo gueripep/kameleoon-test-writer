@@ -11,12 +11,12 @@ This repository contains a local development bridge tailored for Conversion Rate
    - Reliably queries the workspace and injects JavaScript and CSS payloads into the active browser tab immediately at Document completion to prevent underlying race conditions.
 
 2. **Daemon & File Sync (`daemon/`)**:
-   - `watcher.js`: Leverages `chokidar` to automatically monitor your target workflow directory for `.js`, `.css`, and `config.json` modifications, wrapping and broadcasting changes instantly to the Chrome extension.
+   - `watcher.js`: Leverages `chokidar` to automatically monitor your target workflow directory for `.js` and `.css` modifications, wrapping and broadcasting changes instantly to the Chrome extension.
    - `server.js`: The WebSocket bridge handling incoming connections, payload delivery, and two-way communication (e.g., returning results of JS evaluations).
 
-3. **Domain-Based Injection (Optional)**:
-   - Create a `config.json` file in your workspace to target all open tabs matching a specific domain: `{"domain": "example.com"}`.
-   - When present, the bridge targets all tabs matching `*://*.example.com/*` instead of just the active tab.
+3. **Tab Targeting**:
+   - Click the extension icon while on the tab you want the agent to work on, then press **Target This Tab**. The extension moves that tab into a labeled "CRO Target" tab group and pins it as the sole injection target by tab ID.
+   - If no tab is targeted, the bridge falls back to whichever tab is currently active.
 
 4. **MCP Server (`mcp/` & `cli/`)**:
    - Exposed as an MCP (Model Context Protocol) Server via standard IO (`stdio`).

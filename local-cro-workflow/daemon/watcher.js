@@ -1,26 +1,23 @@
 import chokidar from 'chokidar';
 import fs from 'fs/promises';
 import path from 'path';
-import { broadcast } from './server.js';
+import { broadcast, reloadPage } from './server.js';
 
 let watcher = null;
 const currentFiles = new Map();
-let currentUrl = null;
-let currentPreviewUrl = null;
+let currentTargeting = null;
 let currentWorkspacePath = null;
 let isReady = false;
 
 function broadcastState() {
   if (!isReady) return;
-  
+
   const files = Array.from(currentFiles.keys()).map(p => path.relative(currentWorkspacePath, p));
   broadcast({
     event: 'state_update',
     payload: {
       workspacePath: currentWorkspacePath,
       workspaceName: path.basename(currentWorkspacePath),
-      url: currentUrl,
-      previewUrl: currentPreviewUrl,
       files: files
     }
   });
@@ -30,22 +27,15 @@ async function processFile(filePath) {
   try {
     const fileName = path.basename(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    
-    if (fileName === 'config.json') {
-      const content = await fs.readFile(filePath, 'utf-8');
-      try {
-        const config = JSON.parse(content);
-        currentUrl = config.url || null;
-        currentPreviewUrl = config.previewUrl || null;
-        console.log(`Updated configuration: url=${currentUrl}, previewUrl=${currentPreviewUrl}`);
-        broadcast({
-          event: 'config_update',
-          payload: { url: currentUrl, previewUrl: currentPreviewUrl }
-        });
-        broadcastState();
-      } catch (e) {
-        console.error(`Error parsing config.json: ${e.message}`);
-      }
+
+    if (fileName === 'targeting.js') {
+      const raw = (await fs.readFile(filePath, 'utf-8')).trim();
+      currentTargeting = raw || null;
+      console.log('Updated targeting script');
+      broadcast({
+        event: 'config_update',
+        payload: { targeting: currentTargeting }
+      });
       return;
     }
 
@@ -56,23 +46,24 @@ async function processFile(filePath) {
 
     if (ext === '.js') {
       type = 'javascript';
+      // Defer execution to the Kameleoon engine via kameleoonQueue so the variation
+      // never races ahead of Kameleoon. If the engine is already loaded the queue's
+      // push() runs the callback synchronously; otherwise it's queued and replayed
+      // once the engine is ready.
       wrappedContent = `(function() {
-  try {
-    ${content}
-  } catch(e) {
-    console.error('Kameleoon Local Injection Error:', e);
-  }
+  window.kameleoonQueue = window.kameleoonQueue || [];
+  window.kameleoonQueue.push(function() {
+    try {
+      ${content}
+    } catch(e) {
+      console.error('Kameleoon Local Injection Error:', e);
+    }
+  });
 })();`;
     } else if (ext === '.css') {
       type = 'css';
     } else {
       return; 
-    }
-
-    // Check for reload trigger
-    if (/\/\/\s?@reload/.test(content) || /\/\*\s?@reload/.test(content)) {
-      console.log(`🚀 Reload trigger detected in ${filePath}. Triggering page reload...`);
-      import('./server.js').then(server => server.reloadPage());
     }
 
     currentFiles.set(filePath, { type, content: wrappedContent });
@@ -86,12 +77,17 @@ async function processFile(filePath) {
           content: wrappedContent,
           timestamp: Date.now(),
           filePath,
-          url: currentUrl,
-          previewUrl: currentPreviewUrl
+          targeting: currentTargeting
         }
       });
       broadcastState();
     }
+
+    // Reload only after the extension has the fresh content cached and
+    // broadcast — otherwise the reload's webNavigation.onCommitted early
+    // injection can race ahead of this hot_reload message and inject stale
+    // (or no) cached content.
+    reloadPage();
     
   } catch (err) {
     console.error(`Error processing file change for ${filePath}`, err);
@@ -111,9 +107,10 @@ export function initWatcher(workspacePath) {
   watcher.on('add', processFile);
   watcher.on('change', processFile);
   watcher.on('unlink', (filePath) => {
-    if (path.basename(filePath) === 'config.json') {
-      currentUrl = null;
-      currentPreviewUrl = null;
+    const name = path.basename(filePath);
+    if (name === 'targeting.js') {
+      currentTargeting = null;
+      broadcast({ event: 'config_update', payload: { targeting: null } });
     } else {
       currentFiles.delete(filePath);
     }
@@ -136,23 +133,26 @@ export function broadcastCurrentFiles(targetTabId) {
         timestamp: Date.now(),
         filePath,
         targetTabId,
-        url: currentUrl,
-        previewUrl: currentPreviewUrl
+        targeting: currentTargeting
       }
     });
   }
 }
 
 export function replyCurrentFiles(ws, targetTabId) {
-  // Send state first so extension knows context
+  // Send targeting config first so extension evaluates it before injecting files
+  ws.send(JSON.stringify({
+    event: 'config_update',
+    payload: { targeting: currentTargeting }
+  }));
+
+  // Send state so extension knows workspace context
   const files = Array.from(currentFiles.keys()).map(p => path.relative(currentWorkspacePath, p));
   ws.send(JSON.stringify({
     event: 'state_update',
     payload: {
       workspacePath: currentWorkspacePath,
       workspaceName: path.basename(currentWorkspacePath),
-      url: currentUrl,
-      previewUrl: currentPreviewUrl,
       files: files
     }
   }));
@@ -166,8 +166,7 @@ export function replyCurrentFiles(ws, targetTabId) {
         timestamp: Date.now(),
         filePath,
         targetTabId,
-        url: currentUrl,
-        previewUrl: currentPreviewUrl
+        targeting: currentTargeting
       }
     });
     if (ws.readyState === 1) {

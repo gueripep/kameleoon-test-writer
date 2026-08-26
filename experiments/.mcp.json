@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "local-cro-bridge": {
+      "command": "node",
+      "args": [
+        "/Users/paulgueripel/Documents/VSCode/kameleoon-test-writer/local-cro-workflow/cli/bin/cro-agent.js",
+        "/Users/paulgueripel/Documents/VSCode/kameleoon-test-writer/experiments"
+      ]
+    },
+    "dembrandt": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "dembrandt-mcp"
+      ]
+    }
+  }
+}

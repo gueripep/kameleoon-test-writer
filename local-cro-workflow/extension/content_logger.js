@@ -3,45 +3,18 @@
   chrome.storage.local.get({ enabled: true }, (data) => {
     if (!data.enabled) return;
 
-    // --- Inject Console Logger into MAIN world ---
-    const script = document.createElement('script');
-    script.textContent = `
-      window.__kmBridgeLogs = [];
-      const _kmOriginalConsole = { log: console.log, warn: console.warn, error: console.error, info: console.info };
-      function _kmIntercept(type, args) {
-         try {
-            const msg = Array.from(args).map(a => {
-               if (typeof a === 'object') {
-                  try { return JSON.stringify(a); } catch(e) { return String(a); }
-               }
-               return String(a);
-            }).join(' ');
-            window.__kmBridgeLogs.push({ ts: Date.now(), type, msg });
-            if (window.__kmBridgeLogs.length > 500) window.__kmBridgeLogs.shift();
-         } catch(e) {}
-         _kmOriginalConsole[type].apply(console, args);
-      }
-      console.log = function() { _kmIntercept('log', arguments); };
-      console.warn = function() { _kmIntercept('warn', arguments); };
-      console.error = function() { _kmIntercept('error', arguments); };
-      console.info = function() { _kmIntercept('info', arguments); };
-    `;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
-    // ---------------------------------------------
-
     const MAX_ENTRIES = 200;
     const KEYWORDS = ['hothome', 'kameleoon', 'km-', 'special-offer', 'button-group', 'property-info', 'property-metadata', 'moved'];
 
     function isRelevant(el) {
       if (!el || el.nodeType !== 1) return false;
-      const id = (el.id || '').toLowerCase();
+      const id = String(el.id || '').toLowerCase();
       const cls = (el.className?.toString?.() || '').toLowerCase();
       return KEYWORDS.some(kw => id.includes(kw) || cls.includes(kw));
     }
 
     function describe(el) {
-      return el.tagName + '#' + (el.id || '') + '.' + (el.className?.toString?.().substring(0, 60) || '');
+      return el.tagName + '#' + String(el.id || '') + '.' + (el.className?.toString?.().substring(0, 60) || '');
     }
 
     // Clear log on fresh navigation
@@ -100,5 +73,30 @@
       attributeOldValue: true,
       attributeFilter: ['class', 'style', 'data-moved']
     });
+
+    // --- SPA Navigation Support (Navigation API) ---
+    if (window.navigation) {
+      window.navigation.addEventListener('navigate', (event) => {
+        // Only trigger for same-document (SPA) navigations
+        if (event.canIntercept && !event.hashChange && event.downloadRequest === null) {
+          chrome.runtime.sendMessage({ 
+            type: 'SPA_NAVIGATION', 
+            url: event.destination.url 
+          });
+        }
+      });
+    } else {
+      // Fallback for older browsers (standard but less reliable in some SPAs)
+      let lastHref = window.location.href;
+      setInterval(() => {
+        if (lastHref !== window.location.href) {
+          lastHref = window.location.href;
+          chrome.runtime.sendMessage({ 
+            type: 'SPA_NAVIGATION', 
+            url: lastHref 
+          });
+        }
+      }, 1000);
+    }
   });
 })();

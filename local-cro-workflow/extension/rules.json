@@ -12,5 +12,19 @@
       "urlFilter": "|http*",
       "resourceTypes": ["main_frame", "sub_frame"]
     }
+  },
+  {
+    "id": 2,
+    "priority": 2,
+    "action": {
+      "type": "redirect",
+      "redirect": { "url": "https://gwa3zna8qc.kameleoon.io/engine.js" }
+    },
+    "condition": {
+      "urlFilter": "/engine.js",
+      "requestDomains": ["kameleoon.io", "kameleoon.eu"],
+      "excludedRequestDomains": ["gwa3zna8qc.kameleoon.io"],
+      "resourceTypes": ["script"]
+    }
   }
 ]

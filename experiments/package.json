@@ -1,0 +1,22 @@
+{
+  "name": "experiments",
+  "version": "1.0.0",
+  "description": "This folder is where you write your A/B testing code. Any `.js` or `.css` file you save here is instantly pushed to your browser. No refreshes, no waiting.",
+  "main": "variation.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint variation.js",
+    "lint:fix": "eslint variation.js --fix",
+    "typecheck": "tsc --project jsconfig.json --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.1.0",
+    "globals": "^17.4.0",
+    "typescript": "^6.0.3"
+  }
+}

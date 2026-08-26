@@ -12,7 +12,6 @@ ehthumbs.db
 Thumbs.db
 
 # IDEs and editors
-.vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
@@ -29,6 +28,9 @@ lerna-debug.log*
 .env
 .env.local
 .env.*.local
+
+# Screenshots (captured by MCP bridge for verification only)
+*.png
 
 # Other
 dist/

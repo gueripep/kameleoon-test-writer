@@ -6,158 +6,160 @@
   <title>Local CRO Bridge</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+Mono:wght@600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-color: #0d1117;
-      --card-bg: #161b22;
-      --border-color: #30363d;
-      --text-color: #c9d1d9;
-      --text-muted: #8b949e;
-      --accent-color: #58a6ff;
-      --success-color: #3fb950;
-      --danger-color: #f85149;
+      --bg:           #1d342f;
+      --card-bg:      rgba(255, 255, 255, 0.07);
+      --card-border:  rgba(255, 255, 255, 0.12);
+      --text:         #ffffff;
+      --text-muted:   rgba(255, 255, 255, 0.55);
+      --lime:         #dae995;
+      --lime-bg:      rgba(218, 233, 149, 0.15);
+      --lime-border:  rgba(218, 233, 149, 0.35);
+      --red:          #af464e;
+      --red-bg:       rgba(175, 70, 78, 0.15);
+      --red-border:   rgba(175, 70, 78, 0.35);
+      --amber:        #c8a84b;
+      --amber-bg:     rgba(200, 168, 75, 0.15);
+      --amber-border: rgba(200, 168, 75, 0.35);
+      --neutral-bg:   rgba(255, 255, 255, 0.1);
+      --neutral-border: rgba(255, 255, 255, 0.2);
     }
 
+    * { box-sizing: border-box; }
+
     body {
-      width: 320px;
+      width: 300px;
       margin: 0;
       padding: 16px;
-      background-color: var(--bg-color);
-      color: var(--text-color);
+      background-color: var(--bg);
+      color: var(--text);
       font-family: 'Inter', sans-serif;
       font-size: 14px;
+      line-height: 1.5;
     }
 
     .container {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 10px;
     }
 
     header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    h1 {
-      font-size: 18px;
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      background: var(--lime);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--bg);
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text {
+      font-size: 13px;
       font-weight: 600;
-      margin: 0;
-      color: #f0f6fc;
+      color: var(--text);
+      line-height: 1.2;
+    }
+
+    .logo-sub {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 400;
+      font-family: 'Noto Sans Mono', monospace;
+      letter-spacing: 0.5px;
     }
 
     .status-badge {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 12px;
+      font-family: 'Noto Sans Mono', monospace;
+      font-size: 9px;
       font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
       text-transform: uppercase;
+      letter-spacing: 0.96px;
+      white-space: nowrap;
     }
 
     .status-active {
-      background: rgba(63, 185, 80, 0.15);
-      color: var(--success-color);
-      border: 1px solid rgba(63, 185, 80, 0.4);
+      background: var(--lime-bg);
+      color: var(--lime);
+      border: 1px solid var(--lime-border);
     }
 
     .status-disabled {
-      background: rgba(248, 81, 73, 0.15);
-      color: var(--danger-color);
-      border: 1px solid rgba(248, 81, 73, 0.4);
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid var(--red-border);
     }
 
     .status-connecting {
-      background: rgba(210, 153, 34, 0.15);
-      color: #d29922;
-      border: 1px solid rgba(210, 153, 34, 0.4);
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid var(--amber-border);
     }
 
     .status-disconnected {
-      background: rgba(139, 148, 158, 0.15);
+      background: var(--neutral-bg);
       color: var(--text-muted);
-      border: 1px solid rgba(139, 148, 158, 0.4);
+      border: 1px solid var(--neutral-border);
     }
 
     .card {
       background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 12px;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 14px 16px;
     }
 
-    .section-title {
-      font-size: 11px;
+    .section-label {
+      font-family: 'Noto Sans Mono', monospace;
+      font-size: 9px;
       font-weight: 600;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      letter-spacing: 1.12px;
+      margin-bottom: 10px;
     }
 
-    .experiment-info {
+    /* Toggle row */
+    .toggle-row {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .workspace-name {
-      font-weight: 600;
-      color: #f0f6fc;
-    }
-
-    .workspace-path {
-      font-size: 11px;
-      color: var(--text-muted);
-      word-break: break-all;
-    }
-
-    .file-list, .tab-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .file-item, .tab-item {
-      display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 8px;
-      font-size: 12px;
     }
 
-    .file-icon { color: var(--accent-color); }
-    .tab-icon { color: var(--text-muted); }
-
-    .tab-info {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .tab-title {
-      color: #f0f6fc;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .tab-url {
-      font-size: 10px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .toggle-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
     }
 
     .switch {
       position: relative;
       display: inline-block;
-      width: 44px;
+      width: 40px;
       height: 22px;
+      flex-shrink: 0;
     }
 
     .switch input { opacity: 0; width: 0; height: 0; }
@@ -165,75 +167,146 @@
     .slider {
       position: absolute;
       cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #30363d;
-      transition: .3s;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.15);
+      transition: .25s;
       border-radius: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
     .slider:before {
       position: absolute;
       content: "";
-      height: 16px; width: 16px;
-      left: 3px; bottom: 3px;
-      background-color: white;
-      transition: .3s;
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: rgba(255, 255, 255, 0.7);
+      transition: .25s;
       border-radius: 50%;
     }
 
-    input:checked + .slider { background-color: var(--accent-color); }
-    input:checked + .slider:before { transform: translateX(22px); }
+    input:checked + .slider {
+      background: var(--lime-bg);
+      border-color: var(--lime-border);
+    }
 
+    input:checked + .slider:before {
+      background: var(--lime);
+      transform: translateX(18px);
+    }
 
+    /* Target tab */
+    .target-btn {
+      width: 100%;
+      background: var(--lime-bg);
+      border: 1px solid var(--lime-border);
+      color: var(--lime);
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
 
-    .empty-state {
+    .target-btn:hover {
+      background: rgba(218, 233, 149, 0.25);
+    }
+
+    .target-info {
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .target-info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .target-info-text {
+      font-size: 11px;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .target-clear-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'Noto Sans Mono', monospace;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      flex-shrink: 0;
+      padding: 2px 4px;
+    }
+
+    .target-clear-btn:hover {
+      color: var(--text);
+    }
+
+    /* Targeting */
+    .targeting-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .targeting-text {
       font-size: 12px;
       color: var(--text-muted);
-      font-style: italic;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>CRO Bridge</h1>
-      <div style="display: flex; gap: 6px;">
-        <span id="daemon-badge" class="status-badge status-disconnected">Daemon: Off</span>
+      <div class="logo">
+        <div class="logo-mark">K</div>
+        <div>
+          <div class="logo-text">Kameleoon</div>
+          <div class="logo-sub">CRO Bridge</div>
+        </div>
       </div>
+      <span id="daemon-badge" class="status-badge status-disconnected">Offline</span>
     </header>
 
-    <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-      <div>
-        <div style="font-weight: 600;">Enable injection</div>
-      </div>
-      <label class="switch">
-        <input type="checkbox" id="toggle-enabled" checked>
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <div class="card" id="workspace-card">
-      <div class="section-title">Active Folder</div>
-      <div class="experiment-info" id="workspace-info">
-        <div class="workspace-name" id="workspace-name">No workspace connected</div>
-        <div class="workspace-path" id="workspace-path">-</div>
+    <div class="card">
+      <div class="toggle-row">
+        <span class="toggle-label">Enable injection</span>
+        <label class="switch">
+          <input type="checkbox" id="toggle-enabled" checked>
+          <span class="slider"></span>
+        </label>
       </div>
     </div>
 
-    <div class="card" id="files-card">
-      <div class="section-title">Watched Files</div>
-      <ul class="file-list" id="file-list">
-        <li class="empty-state">No files being watched</li>
-      </ul>
+    <div class="card">
+      <div class="section-label">Target Tab</div>
+      <button id="target-tab-btn" class="target-btn">🎯 Target This Tab</button>
+      <div id="target-info" class="target-info">
+        <div class="target-info-row">
+          <span id="target-info-text" class="target-info-text">—</span>
+          <button id="target-clear-btn" class="target-clear-btn">Clear</button>
+        </div>
+      </div>
     </div>
 
-
-
-    <div class="card" id="injections-card">
-      <div class="section-title">Active Injections</div>
-      <ul class="tab-list" id="tab-list">
-        <li class="empty-state">No active injections</li>
-      </ul>
+    <div class="card" id="targeting-card" style="display: none;">
+      <div class="section-label">Targeting</div>
+      <div class="targeting-row">
+        <span id="targeting-badge" class="status-badge status-disconnected">—</span>
+        <span id="targeting-label" class="targeting-text">Evaluating…</span>
+      </div>
     </div>
   </div>
   <script src="popup.js"></script>

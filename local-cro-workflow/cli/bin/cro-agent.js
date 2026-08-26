@@ -19,7 +19,7 @@ if (workspaceDir.endsWith('local-cro-workflow')) {
 }
 
 async function main() {
-  console.error(`Starting Local CRO Bridge MCP Server pointing to workspace: ${workspaceDir}`);
+  console.error(`Starting Local CRO Bridge MCP Server (PID: ${process.pid}) pointing to workspace: ${workspaceDir}`);
   
   // Ensure port 5678 is free (especially important when started directly by IDE/MCP client)
   try {
