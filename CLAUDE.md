@@ -81,6 +81,21 @@ For all Kameleoon experiment work (selector discovery, DOM reading, JS evaluatio
 
 The **target tab is set directly in the Chrome extension popup** — while on the tab you want to work on, click the extension icon and press "Target This Tab". The tab is moved into a labeled "CRO Target" tab group and pinned by tab ID (not URL), so it stays targeted across reloads and navigations. No config file needed. If no tab is targeted, injection falls back to the active tab.
 
+## Publishing to the Kameleoon App (`push_to_kameleoon`)
+
+Once an experiment is verified locally, three MCP tools publish it to the Kameleoon app. Every HTTP call is made by the extension from inside a logged-in `app.kameleoon.com` tab, because the only usable credential is the user's own session cookie — Automation API client credentials are bound to the user's account and are unobtainable for impersonated client accounts. The cookie is never read, stored or transported; only status codes and response bodies come back over the WebSocket. There is deliberately no "get the session token" tool, and the proxy refuses any host other than `api.kameleoon.com` and any method other than GET/POST/PATCH.
+
+The user must already be logged in, and for client work must already have impersonated the client account by hand. **Never automate login or impersonation.** If no `app.kameleoon.com` tab is open, the tools fail with a message saying so — open one, don't work around it.
+
+The flow:
+
+1. `mcp__local-cro-bridge__list_kameleoon_experiments` — read-only. Rank candidates by `siteCode`/`baseURL` host vs the CRO target tab's URL (the response includes `targetTabUrl` for exactly this, and it dominates), then name similarity to the branch / most recent `.archive/` folder / what the user called the test, then `dateModified` and `status`. Archived experiments are excluded and are never valid targets.
+2. **Show the user the top candidate and a couple of alternatives, with name, id, status and `baseURL`, and say why the top one won.** If nothing scores well, ask instead of guessing confidently.
+3. `mcp__local-cro-bridge__create_kameleoon_variation` — creates a *new* variation (never overwrites one) via `POST /variations` plus an attach `PATCH /experiments/{id}`. The POST alone produces a variation attached to nothing; the PATCH replaces the whole `variations` array and `deviations` map, **rewriting the live traffic split**. It requires `confirmed: true`, which may only be passed after the user has seen the before/after split and said yes. Traffic is split evenly by default; pass an explicit `deviations` map keyed by `"origin"`, the existing variation ids, and `"new"` for the one being created.
+4. `mcp__local-cro-bridge__push_variation_code` — writes `variation.js` → `jsCode` and `variation.css` → `cssCode` on an explicit `variationId`, then reads the variation back to verify. Idempotent, so re-run it after a local tweak instead of creating another variation. It refuses to write to a variation owned by a different experiment, or to overwrite code this session did not write unless `overwrite: true`.
+
+Nothing here deletes: `DELETE /variations/{id}` exists and is never called.
+
 ## A/B Test Coding Standards
 
 See `experiments/CLAUDE.md` for the full coding standards. Key rules:
@@ -95,5 +110,5 @@ See `experiments/CLAUDE.md` for the full coding standards. Key rules:
 
 - The extension service worker reconnects automatically (5s–60s exponential backoff) when the daemon restarts
 - `server.js` maintains a single `extensionSocket` reference — only one extension connection is active at a time
-- MCP tool calls are routed through the daemon as request/response pairs with a 10-second timeout
+- MCP tool calls are routed through the daemon as request/response pairs with a 10-second timeout; the Kameleoon API proxy uses a longer one (20s, 30s for `GET /experiments`, which is the slow call on a large account)
 - The `kameleoon.d.ts` file documents the full API surface; reference it when writing or reviewing experiment code

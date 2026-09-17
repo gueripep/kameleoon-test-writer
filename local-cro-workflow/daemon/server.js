@@ -39,7 +39,7 @@ export function initWebSocketServer(port = 5678) {
           replyCurrentFiles(ws, data.tabId);
         } else if (data.type === 'status_result') {
           handleStatusResult(data);
-        } else if (['evaluate_result', 'click_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result', 'open_url_result', 'dom_result', 'viewport_result', 'network_result', 'clear_emulation_result', 'set_enabled_result', 'response_headers_result', 'lifecycle_timeline_result'].includes(data.type)) {
+        } else if (['evaluate_result', 'click_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result', 'open_url_result', 'dom_result', 'viewport_result', 'network_result', 'clear_emulation_result', 'set_enabled_result', 'response_headers_result', 'lifecycle_timeline_result', 'kameleoon_api_result'].includes(data.type)) {
           handleExtensionResult(data);
         }
       } catch (err) {
@@ -150,6 +150,16 @@ let currentWorkspace = process.cwd();
 
 export function setWorkspacePath(p) {
   currentWorkspace = p;
+}
+
+export function getWorkspacePath() {
+  return currentWorkspace;
+}
+
+// Proxies a single api.kameleoon.com call through a logged-in app.kameleoon.com tab.
+// Only status + body come back; the session cookie never leaves the browser.
+export function kameleoonApiRequest({ method, url, body = null }, timeoutMs = 20000) {
+  return sendExtensionRequest('kameleoon_api', { method, url, body }, timeoutMs);
 }
 
 export function getStatus(timeoutMs = 5000) {

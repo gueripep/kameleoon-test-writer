@@ -202,6 +202,8 @@ function connect() {
         handleReadResponseHeaders(data.payload);
       } else if (data.event === 'arm_lifecycle_capture') {
         handleArmLifecycleCapture(data.payload);
+      } else if (data.event === 'kameleoon_api') {
+        handleKameleoonApi(data.payload);
       }
     } catch (err) {
       console.error('Error handling message:', err);
@@ -743,6 +745,81 @@ async function handleListTabs(payload) {
         error: e.toString()
       }));
     }
+  }
+}
+
+// --- Kameleoon Automation API proxy ------------------------------------------------
+// Issues api.kameleoon.com calls from inside a logged-in app.kameleoon.com tab so they
+// inherit the user's session cookie. The cookie itself is never read, stored or sent
+// anywhere: only the HTTP status and the parsed response body come back over the socket.
+const KAMELEOON_API_ORIGIN = 'https://api.kameleoon.com';
+const KAMELEOON_APP_TAB_MATCH = 'https://app.kameleoon.com/*';
+// DELETE is deliberately absent — this bridge creates and updates, it never destroys.
+const KAMELEOON_ALLOWED_METHODS = ['GET', 'POST', 'PATCH'];
+
+async function handleKameleoonApi(payload) {
+  if (!isEnabled) return;
+  const { messageId, method, url, body } = payload || {};
+
+  const respond = (msg) => {
+    if (socket && socket.readyState === WebSocket.OPEN && messageId) {
+      socket.send(JSON.stringify({ type: 'kameleoon_api_result', messageId, ...msg }));
+    }
+  };
+
+  try {
+    const verb = String(method || 'GET').toUpperCase();
+    if (!KAMELEOON_ALLOWED_METHODS.includes(verb)) {
+      throw new Error(`Method ${verb} is not allowed by the Kameleoon API proxy (allowed: ${KAMELEOON_ALLOWED_METHODS.join(', ')})`);
+    }
+    if (typeof url !== 'string' || !url.startsWith(`${KAMELEOON_API_ORIGIN}/`)) {
+      throw new Error(`Refusing to call ${url} — the Kameleoon API proxy only calls ${KAMELEOON_API_ORIGIN}`);
+    }
+
+    const tabs = await chrome.tabs.query({ url: KAMELEOON_APP_TAB_MATCH });
+    const tab = tabs.find(t => !t.discarded && t.status === 'complete') || tabs.find(t => !t.discarded) || tabs[0];
+    if (!tab) {
+      throw new Error('No app.kameleoon.com tab is open. Open https://app.kameleoon.com in Chrome and log in (impersonating the client account first, if this is client work), then retry. The bridge never logs in for you.');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: async (verb, url, body) => {
+        try {
+          const init = { method: verb, credentials: 'include', headers: { Accept: 'application/json' } };
+          if (body !== null && body !== undefined && verb !== 'GET') {
+            init.headers['Content-Type'] = 'application/json';
+            init.body = JSON.stringify(body);
+          }
+          const res = await fetch(url, init);
+          const text = await res.text();
+          let parsed = null;
+          let isJson = false;
+          try {
+            parsed = text ? JSON.parse(text) : null;
+            isJson = true;
+          } catch (e) { /* non-JSON body, e.g. an HTML login page */ }
+          return {
+            ok: res.ok,
+            status: res.status,
+            statusText: res.statusText,
+            body: isJson ? parsed : null,
+            rawBody: isJson ? null : text.slice(0, 2000)
+          };
+        } catch (e) {
+          return { ok: false, status: 0, networkError: String(e) };
+        }
+      },
+      args: [verb, url, body === undefined ? null : body],
+      world: 'MAIN'
+    });
+
+    const result = results && results[0] ? results[0].result : null;
+    if (!result) throw new Error(`No response from the app.kameleoon.com tab (${tab.id}) — it may have navigated mid-request`);
+
+    respond({ result: { ...result, method: verb, url, tab: { id: tab.id, url: tab.url } } });
+  } catch (e) {
+    respond({ error: e.toString() });
   }
 }
 

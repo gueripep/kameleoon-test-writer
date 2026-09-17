@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { kameleoonTools, handleKameleoonTool } from "./kameleoon_push.js";
 import { evaluateJs, clickElement, toggleSimulation, broadcast, captureScreenshot, readMutationLog, clearMutationLog, listTabs, activateTab, getStatus, openUrl, setViewport, emulateNetwork, clearEmulation, reloadPage, setExtensionEnabled, readResponseHeaders, captureLifecycleTimeline } from "../daemon/server.js";
 
 const server = new Server(
@@ -188,6 +189,7 @@ const CaptureLifecycleTimelineSchema = z.object({
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      ...kameleoonTools,
       {
         name: "evaluate_js",
         description: "Executes JavaScript in the active Chrome tab via the Extension and returns the result synchronousy.",
@@ -363,6 +365,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const kameleoonResult = await handleKameleoonTool(request.params.name, request.params.arguments);
+  if (kameleoonResult) return kameleoonResult;
+
   if (request.params.name === "evaluate_js") {
     const args = EvaluateJsSchema.parse(request.params.arguments);
     try {
