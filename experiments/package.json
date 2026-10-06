@@ -7,7 +7,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint variation.js",
     "lint:fix": "eslint variation.js --fix",
-    "typecheck": "tsc --project jsconfig.json --noEmit"
+    "typecheck": "tsc --project jsconfig.json --noEmit",
+    "archive": "./scripts/archive.sh",
+    "restore": "./scripts/restore.sh"
   },
   "keywords": [],
   "author": "",

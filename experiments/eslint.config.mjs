@@ -33,5 +33,5 @@ export default [
             ],
             "func-style": ["error", "expression"]
         }
-    }
+    },
 ];

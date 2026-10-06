@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Archive & Reset Variation",
+            "type": "shell",
+            "command": "./scripts/archive.sh",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Claude Code",
+            "type": "shell",
+            "command": "claude",
+            "options": { "cwd": "${workspaceFolder}" },
+            "isBackground": true,
+            "runOptions": { "runOn": "folderOpen" },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true,
+                "clear": false,
+                "showReuseMessage": false
+            },
+            "problemMatcher": []
+        }
+    ]
+}
