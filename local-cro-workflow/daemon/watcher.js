@@ -23,6 +23,8 @@ function broadcastState() {
 }
 
 async function processFile(filePath) {
+  // Only the variation files are injected; anything else in the folder (scripts/, configs) is not page code.
+  if (!['variation.js', 'variation.css'].includes(path.relative(currentWorkspacePath, filePath))) return;
   try {
     const ext = path.extname(filePath).toLowerCase();
 
