@@ -15,7 +15,6 @@
       { "command": "kameleoonArchive.compare", "title": "Compare With Current", "icon": "$(diff)" },
       { "command": "kameleoonArchive.startFromTicket", "title": "Kameleoon: Start From HubSpot Ticket", "icon": "$(rocket)" },
       { "command": "kameleoonArchive.startFromImportedTicket", "title": "Start From This Ticket", "icon": "$(rocket)" },
-      { "command": "kameleoonArchive.toggleBridge", "title": "Kameleoon: Pause/Resume Injection" },
       { "command": "kameleoonArchive.refresh", "title": "Refresh", "icon": "$(refresh)" }
     ],
     "views": {

@@ -7,7 +7,7 @@ Read this when changing the bridge itself. Setup lives in `README.md`.
 - `cli/bin/cro-agent.js` starts the daemon, the watcher and the MCP stdio server.
 - `daemon/server.js` keeps a single `extensionSocket`, so only one extension connection is active at a time.
 - MCP tool calls go through the daemon as request/response pairs with a 10s timeout. The Kameleoon API proxy waits longer: 20s, and 30s for `GET /experiments`, which is slow on a large account.
-- The same port serves a small HTTP control API (`GET /status`, `POST /enabled`, `POST /import-ticket`) for the VS Code extension in `experiments/scripts/vscode-extension/`. It only answers loopback requests that carry `X-CRO-Client: vscode` and no `Origin`, so web pages can't drive it.
+- The same port serves a small HTTP control API (`GET /status`, `POST /import-ticket`, and `POST /release` for session handover) for the VS Code extension in `experiments/scripts/vscode-extension/`. It only answers loopback requests that carry `X-CRO-Client: vscode` and no `Origin`, so web pages can't drive it.
 - The bridge listens on `127.0.0.1` only. A new session takes the port over by asking the running bridge (`POST /release`). The old process stays up and its tools say they were taken over (`/mcp` takes the bridge back). Only a bridge that doesn't answer gets killed, and only its listening PID: a bare `lsof -ti:5678` also lists Chrome's end of the socket.
 - The watcher only serves `variation.js` and `variation.css`. Every file it serves is injected into the page, so don't widen it.
 - The extension service worker reconnects with backoff (5s–60s) when the daemon restarts.

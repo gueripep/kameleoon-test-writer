@@ -56,14 +56,10 @@ const bridge = (method, route, body, timeout = 3000) => new Promise((resolve, re
 
 const createStatusBar = context => {
     const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    item.command = 'kameleoonArchive.toggleBridge';
     item.show();
-    let state = { enabled: null };
-
-    const show = (text, tooltip, enabled = null) => {
+    const show = (text, tooltip) => {
         item.text = text;
         item.tooltip = tooltip;
-        state = { enabled };
     };
 
     const refresh = async () => {
@@ -85,27 +81,15 @@ const createStatusBar = context => {
         const where = host || 'no target tab';
         const tip = [
             host ? `Target: ${ext.targetTabUrl}` : 'No tab targeted: injection falls back to the active tab. Use "Target This Tab" in the extension popup.',
-            ext.isEnabled ? 'Click to pause injection.' : 'Injection paused. Click to resume.',
+            !ext.isEnabled && 'Injection is turned off in the Chrome extension popup.',
             warning
         ].filter(Boolean).join('\n');
-        show(ext.isEnabled ? `$(circle-filled) CRO · ${where}` : `$(debug-pause) CRO paused · ${where}`, tip, ext.isEnabled);
-    };
-
-    const toggle = async () => {
-        if (state.enabled === null) return vscode.window.showInformationMessage(item.tooltip);
-        try {
-            const res = await bridge('POST', '/enabled', { enabled: !state.enabled }, 8000);
-            if (res.status !== 200) throw new Error(res.body?.error || `HTTP ${res.status}`);
-        } catch (e) {
-            vscode.window.showErrorMessage(`Could not toggle injection: ${e.message}`);
-        }
-        refresh();
+        show(ext.isEnabled ? `$(circle-filled) CRO · ${where}` : `$(debug-pause) CRO paused · ${where}`, tip);
     };
 
     refresh();
     const timer = setInterval(refresh, 5000);
-    context.subscriptions.push(item, { dispose: () => clearInterval(timer) },
-        vscode.commands.registerCommand('kameleoonArchive.toggleBridge', toggle));
+    context.subscriptions.push(item, { dispose: () => clearInterval(timer) });
 };
 
 class ExperimentsTree {

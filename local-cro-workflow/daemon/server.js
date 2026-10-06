@@ -155,7 +155,6 @@ async function handleControlRequest(req, res) {
       send(200, { released: true });
       return res.on('finish', () => releasePort(Number(body.pid) || 'unknown'));
     }
-    if (req.url === '/enabled') return send(200, await setExtensionEnabled(Boolean(body.enabled)));
     if (req.url === '/import-ticket') return send(200, await importHubspotTicketByUrl(String(body.url || '')));
     send(404, { error: 'not found' });
   } catch (e) {

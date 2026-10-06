@@ -86,7 +86,7 @@ To run it by hand instead, run `npm start` from `local-cro-workflow/`, or `node 
 ## VS Code Extension
 
 `experiments/scripts/vscode-extension/` adds three things to VS Code:
-- a status bar item showing whether the bridge is up, whether Chrome is connected and which tab is targeted (click it to pause or resume injection);
+- a status bar item showing whether the bridge is up, whether Chrome is connected and which tab is targeted (it also shows when injection is paused in the Chrome popup);
 - a **Kameleoon Experiments** panel in the Explorer listing the current experiment, the archives (open, compare with current, restore) and the imported tickets;
 - **Start From HubSpot Ticket**, which imports a ticket, archives the current work, opens the brief and starts Claude on it.
 
