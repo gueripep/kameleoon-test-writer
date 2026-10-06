@@ -151,8 +151,8 @@ class ExperimentsTree {
     }
 }
 
-const execScript = (cwd, script) => new Promise((resolve, reject) => {
-    execFile('bash', [path.join('scripts', script)], { cwd, timeout: 60000 }, (err, stdout, stderr) => {
+const execScript = (cwd, script, ...args) => new Promise((resolve, reject) => {
+    execFile('bash', [path.join('scripts', script), ...args], { cwd, timeout: 60000 }, (err, stdout, stderr) => {
         if (err) reject(new Error((stderr || err.message).trim()));
         else resolve(stdout.trim());
     });
@@ -223,10 +223,17 @@ const activate = context => {
 
     context.subscriptions.push(
         vscode.window.registerTreeDataProvider('kameleoonExperiments', tree),
-        vscode.commands.registerCommand('kameleoonArchive.restore', arg => {
+        vscode.commands.registerCommand('kameleoonArchive.restore', async arg => {
             const uri = target(arg);
             if (!uri) return vscode.window.showErrorMessage('Right-click a folder inside .archive/ to restore it.');
-            run(rootFor(uri), 'restore.sh', uri.fsPath);
+            const dir = rootFor(uri);
+            try {
+                await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Restoring ${path.basename(uri.fsPath)}…` },
+                    () => execScript(dir, 'restore.sh', uri.fsPath));
+            } catch (e) {
+                return vscode.window.showErrorMessage(`Restore failed: ${e.message}`);
+            }
+            await vscode.window.showTextDocument(vscode.Uri.file(path.join(dir, 'variation.js')), { preview: false });
         }),
         vscode.commands.registerCommand('kameleoonArchive.archive', () => {
             const dir = experimentsDir();
