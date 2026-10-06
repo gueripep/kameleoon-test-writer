@@ -45,6 +45,6 @@ experiments/variation.js
 experiments/variation.css
 experiments/config.json
 experiments/.test-id
-# Machine-specific paths; copy .mcp.json.example
+# Machine-specific paths (see local-cro-workflow/README.md)
 experiments/.mcp.json
 __pycache__/
