@@ -7,7 +7,7 @@
 // across the load, buffering everything into sessionStorage. The extension reads
 // __kmLifecycleTimeline back once the capture window closes.
 //
-// See docs/SPEC-lifecycle-timeline.md. Timestamps use performance.now() (ms since
+// Timestamps use performance.now() (ms since
 // timeOrigin ≈ navigationStart) so they align 1:1 with paint entries.
 (function () {
   const SPEC_KEY = '__kmLifecycleSpec';

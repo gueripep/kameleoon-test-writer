@@ -79,6 +79,8 @@ Sometimes injection isn't enough, and you need a full page reload. We've added t
 
 The bridge will now monitor your experiments folder and sync changes to your active tab instantly.
 
+For Claude Code, copy `experiments/.mcp.json.example` to `experiments/.mcp.json` and fill in your paths. The copy is gitignored.
+
 To run it by hand instead, run `npm start` from `local-cro-workflow/`, or `node local-cro-workflow/cli/bin/cro-agent.js /absolute/path/to/experiments`. The daemon listens on `ws://127.0.0.1:5678`, and the extension has to be loaded and connected before any tool works.
 
 ## Automatic Startup (VS Code)

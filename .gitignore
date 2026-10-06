@@ -41,6 +41,9 @@ build/
 experiments/.archive/
 experiments/.tickets/
 memory/
-SPEC-hubspot-ticket-import.md
-local-cro-workflow/SPEC-*.md
+experiments/variation.js
+experiments/variation.css
+experiments/config.json
+# Machine-specific paths; copy .mcp.json.example
+experiments/.mcp.json
 __pycache__/
