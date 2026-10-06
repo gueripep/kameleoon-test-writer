@@ -6,6 +6,15 @@ Instructions live only in `AGENTS.md` files, which both Claude Code and Codex re
 
 Tool names in these files are bare `local-cro-bridge` tool names (`evaluate_js`). In Claude Code they appear as `mcp__local-cro-bridge__evaluate_js`.
 
+## Push back with a better idea
+
+If what the user asks for has a better solution, say so before doing it, in one or two sentences, with your recommendation. Then do what they decide. This is most important for general engineering and tooling: how to structure code, where a rule belongs, how to enforce something, how to use AI tools. There, offer your own view instead of complying by default. On Kameleoon and client specifics, the user's experience wins. Still flag it if something contradicts what you can measure.
+
+This applies most to "add X to AGENTS.md". Prose an agent may skip is often the weakest place for a rule. Check whether it belongs somewhere stronger first:
+- in code that makes the mistake impossible (a guard, `confirmed: true`, a lint rule, a git hook);
+- in the tool's description, if it's about when or how to use a tool;
+- in a skill, if it's a procedure for one kind of task.
+
 ## Browser work goes through the bridge
 
 For experiment work (selectors, DOM, JS, screenshots, clicks), always use the `local-cro-bridge` tools and never a general-purpose browser tool such as claude-in-chrome. The bridge targets the user's real tab. If its tools aren't available, the MCP server isn't connected: say so and ask the user to check the daemon and extension. Don't fall back silently.
