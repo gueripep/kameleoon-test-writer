@@ -1,31 +1,21 @@
 import http from 'http';
+import { execSync } from 'child_process';
 import { WebSocketServer } from 'ws';
 import { broadcastCurrentFiles, replyCurrentFiles, getFiles } from './watcher.js';
 import { importTicket } from './ticket_import.js';
 
 let wss = null;
+let httpServer = null;
+let releasedTo = null;
 const pendingEvaluations = new Map();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-export function initWebSocketServer(port = 5678) {
-  try {
-    const server = http.createServer(handleControlRequest);
-    wss = new WebSocketServer({ server });
-    server.listen(port, '0.0.0.0');
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(`\n!!! ERROR: Port ${port} is already in use.`);
-        console.error(`Check if another instance of the Local CRO Bridge is running.`);
-        console.error(`The agent tried to clear this port automatically, but it might have failed.\n`);
-      } else {
-        console.error(`WebSocket server error: ${err.message}`);
-      }
-      process.exit(1);
-    });
-  } catch (err) {
-    console.error(`Failed to create WebSocket server: ${err.message}`);
-    throw err;
-  }
-  
+export async function initWebSocketServer(port = 5678) {
+  httpServer = http.createServer(handleControlRequest);
+  wss = new WebSocketServer({ server: httpServer });
+  // ws re-emits the http server's errors here; they are handled in listenOrTakeOver and below.
+  wss.on('error', () => {});
+
   wss.on('connection', (ws, req) => {
     const remoteAddress = req.socket.remoteAddress;
     console.log(`Extension connected to WebSocket daemon from ${remoteAddress}`);
@@ -61,7 +51,84 @@ export function initWebSocketServer(port = 5678) {
     });
   });
 
-  console.log(`WebSocket server listening on ws://0.0.0.0:${port} (Accessible via localhost and 127.0.0.1)`);
+  await listenOrTakeOver(port);
+  httpServer.on('error', (err) => console.error(`WebSocket server error: ${err.message}`));
+  console.log(`WebSocket server listening on ws://127.0.0.1:${port}`);
+}
+
+// A new session asks the running bridge to hand the port over rather than killing it, so the
+// old session's tools fail with a clear message instead of its MCP server dying.
+async function listenOrTakeOver(port) {
+  const listen = () => new Promise((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(port, '127.0.0.1', () => {
+      httpServer.off('error', reject);
+      resolve();
+    });
+  });
+  const tryListen = async () => {
+    try {
+      await listen();
+      return true;
+    } catch (e) {
+      if (e.code !== 'EADDRINUSE') throw e;
+      return false;
+    }
+  };
+
+  if (await tryListen()) return;
+  console.log(`Port ${port} is in use; asking the running bridge to hand it over...`);
+  if (!(await requestRelease(port))) {
+    // Old bridge without /release, or hung. -sTCP:LISTEN matters: without it lsof also lists
+    // Chrome's end of the WebSocket, and that process would be killed instead.
+    try {
+      const pids = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`).toString().trim().split('\n').filter(Boolean);
+      for (const pid of pids) {
+        console.log(`Bridge did not answer; killing listener ${pid}`);
+        process.kill(Number(pid), 'SIGKILL');
+      }
+    } catch (e) {
+      // lsof exits non-zero when nothing is listening
+    }
+  }
+  for (let i = 0; i < 20; i++) {
+    await sleep(250);
+    if (await tryListen()) return;
+  }
+  throw new Error(`Port ${port} is still in use after asking the running bridge to release it.`);
+}
+
+function requestRelease(port) {
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1', port, path: '/release', method: 'POST', timeout: 2000,
+      headers: { 'X-CRO-Client': 'vscode', 'Content-Type': 'application/json' }
+    }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+    req.end(JSON.stringify({ pid: process.pid }));
+  });
+}
+
+function takenOverMessage() {
+  return `The browser bridge was taken over by another Claude session (PID ${releasedTo}). Run /mcp here to take it back.`;
+}
+
+// Gives the port to a newer session. This process keeps running so its MCP tools can explain why they stopped.
+function releasePort(newOwner) {
+  releasedTo = newOwner;
+  console.log(`Handing the bridge over to PID ${newOwner}.`);
+  for (const client of wss.clients) client.terminate();
+  wss.close();
+  httpServer.close();
+  for (const [id, pending] of pendingEvaluations) {
+    clearTimeout(pending.timeout);
+    pending.reject(new Error(takenOverMessage()));
+    pendingEvaluations.delete(id);
+  }
 }
 
 // Control API for the VS Code extension. Loopback only, and a request carrying an Origin
@@ -84,6 +151,10 @@ async function handleControlRequest(req, res) {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
+    if (req.url === '/release') {
+      send(200, { released: true });
+      return res.on('finish', () => releasePort(Number(body.pid) || 'unknown'));
+    }
     if (req.url === '/enabled') return send(200, await setExtensionEnabled(Boolean(body.enabled)));
     if (req.url === '/import-ticket') return send(200, await importHubspotTicketByUrl(String(body.url || '')));
     send(404, { error: 'not found' });
@@ -131,6 +202,7 @@ export function broadcast(payload) {
 
 function sendExtensionRequest(event, payload = {}, timeoutMs = 5000, waitForConnection = true) {
   return new Promise(async (resolve, reject) => {
+    if (releasedTo) return reject(new Error(takenOverMessage()));
     if (waitForConnection && (!wss || wss.clients.size === 0)) {
       await new Promise(r => setTimeout(r, Math.min(timeoutMs, 5000)));
       if (!wss || wss.clients.size === 0) {
@@ -244,7 +316,7 @@ export function getStatus(timeoutMs = 5000) {
     // Always return daemon info
     const status = {
       daemon: {
-        status: 'online',
+        status: releasedTo ? 'taken_over' : 'online',
         port: 5678,
         pid: process.pid,
         connectedExtensions: clientsCount,
@@ -255,6 +327,7 @@ export function getStatus(timeoutMs = 5000) {
       extensions: []
     };
 
+    if (releasedTo) status.error = takenOverMessage();
     if (clientsCount === 0) {
       return resolve(status);
     }
