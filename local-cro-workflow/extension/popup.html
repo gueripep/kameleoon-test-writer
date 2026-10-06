@@ -254,17 +254,31 @@
       color: var(--text);
     }
 
-    /* Targeting */
-    .targeting-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    /* Ticket import */
+    .ticket-subject {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .targeting-text {
-      font-size: 12px;
-      color: var(--text-muted);
+    .target-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
     }
+
+    .ticket-result {
+      display: none;
+      margin-top: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .ticket-result.ok  { color: var(--lime); }
+    .ticket-result.err { color: var(--red); }
   </style>
 </head>
 <body>
@@ -301,13 +315,13 @@
       </div>
     </div>
 
-    <div class="card" id="targeting-card" style="display: none;">
-      <div class="section-label">Targeting</div>
-      <div class="targeting-row">
-        <span id="targeting-badge" class="status-badge status-disconnected">—</span>
-        <span id="targeting-label" class="targeting-text">Evaluating…</span>
-      </div>
+    <div class="card" id="ticket-card" style="display: none;">
+      <div class="section-label">HubSpot Ticket</div>
+      <div id="ticket-subject" class="ticket-subject">—</div>
+      <button id="ticket-import-btn" class="target-btn">⬇︎ Import ticket</button>
+      <div id="ticket-result" class="ticket-result"></div>
     </div>
+
   </div>
   <script src="popup.js"></script>
 </body>

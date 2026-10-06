@@ -12,6 +12,9 @@
 //   list_kameleoon_experiments  — read-only, feeds the agent's experiment guess
 //   create_kameleoon_variation  — POST /variations + attach PATCH (rewrites traffic split)
 //   push_variation_code         — PATCH /variations/{id} with the workspace files
+//   create_kameleoon_goal       — POST /goals (CUSTOM) + optional append to experiments' goals
+//   create_kameleoon_experiment — POST /experiments (always a draft) + optional goal attach
+//   push_experiment_script      — PATCH /experiments/{id} globalScript ("Experiment custom script"; never the site's)
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -32,7 +35,7 @@ const LOGGED_OUT_HINT =
  * Issues one Automation API call through the browser session and normalizes failures
  * into messages that say what the user has to do about them.
  */
-async function apiRequest(method, pathAndQuery, body = null, timeoutMs = 20000) {
+export async function apiRequest(method, pathAndQuery, body = null, timeoutMs = 20000) {
   const url = `${API_ORIGIN}${pathAndQuery}`;
   const res = await kameleoonApiRequest({ method, url, body }, timeoutMs);
 
@@ -142,7 +145,7 @@ function assertValidDeviations(deviations, expectedKeys) {
 
 // --- workspace files --------------------------------------------------------------
 
-async function readWorkspaceFile(fileName) {
+export async function readWorkspaceFile(fileName) {
   const workspace = getWorkspacePath();
   const candidates = [
     path.join(workspace, fileName),
@@ -183,6 +186,32 @@ const PushVariationCodeSchema = z.object({
   overwrite: z.boolean().optional().describe("Acknowledge overwriting code on a variation this session did not create. Required when the target already holds different non-empty code.")
 });
 
+const CreateGoalSchema = z.object({
+  siteId: z.number().describe("Kameleoon siteId of the project the goal belongs to (an experiment's siteId)."),
+  name: z.string().describe("Goal name as it will appear in the app. Must not collide with an existing non-CUSTOM goal of the same name on the site."),
+  description: z.string().optional().describe("Optional goal description."),
+  hasMultipleConversions: z.boolean().optional().describe("Count every conversion instead of one per visit (default false)."),
+  attachToExperimentIds: z.array(z.number()).optional().describe("Experiments to add the goal to. Appended to each experiment's existing goals — nothing is removed and mainGoalId is untouched.")
+});
+
+const CreateExperimentSchema = z.object({
+  siteId: z.number().describe("Kameleoon siteId of the project to create the experiment in (from GET /sites or an existing experiment)."),
+  name: z.string().describe("Experiment name as it will appear in the app."),
+  baseURL: z.string().url().describe("URL loaded in the editor and in preview/simulation mode. For login goals use the storefront's /account/login (the sign-in page it redirects to has one-time params and no Kameleoon engine)."),
+  type: z.enum(['DEVELOPER', 'CLASSIC']).optional().describe("DEVELOPER (default) is a code-editor experiment, which is what QA and all bridge work use. Pass CLASSIC only if the user explicitly asks for a graphic-editor experiment."),
+  description: z.string().optional().describe("Optional experiment description."),
+  goalIds: z.array(z.number()).optional().describe("Goals to attach after creation (appended, nothing removed). Must belong to the same site."),
+  mainGoalId: z.number().optional().describe("Optional main goal. Must also be listed in goalIds."),
+  updateExisting: z.boolean().optional().describe("When an experiment with this name already exists, set its baseURL (and type, if passed) to the requested values. Only allowed on DRAFT experiments; refused otherwise.")
+});
+
+const PushExperimentScriptSchema = z.object({
+  experimentId: z.number().describe("Id of the experiment whose 'Experiment custom script' to write."),
+  code: z.string().describe("JavaScript for the experiment custom script. Replaces the whole field."),
+  overwrite: z.boolean().optional().describe("Acknowledge replacing a different non-empty experiment script. Required when one is already there."),
+  confirmed: z.boolean().optional().describe("Required when the experiment is not a draft: the script runs for all its visitors as soon as Kameleoon loads, regardless of targeting. Only pass after the user said yes.")
+});
+
 export const kameleoonTools = [
   {
     name: "list_kameleoon_experiments",
@@ -198,6 +227,21 @@ export const kameleoonTools = [
     name: "push_variation_code",
     description: "Reads variation.js and variation.css from the local workspace and PATCHes them into a Kameleoon variation's jsCode/cssCode (the variation code editor — experiment-level commonJavaScriptCode/globalScript are untouched). Idempotent: safe to re-run after a local edit without creating another variation. Verifies the write by reading the variation back.",
     inputSchema: zodToJsonSchema(PushVariationCodeSchema)
+  },
+  {
+    name: "create_kameleoon_goal",
+    description: "Creates a CUSTOM goal (converted from code with Kameleoon.API.Goals.processConversion(goalId)) via POST /goals, optionally attaching it to experiments by appending to their goals list. Idempotent by name: if a non-archived CUSTOM goal with the same name already exists on the site it is reused, not duplicated, so re-running after a restart is safe. Attaching edits the client's experiment, so confirm the goal names and target experiments with the user first. Returns the goal id and, per experiment, the goals list before/after.",
+    inputSchema: zodToJsonSchema(CreateGoalSchema)
+  },
+  {
+    name: "create_kameleoon_experiment",
+    description: "Creates a DRAFT code-editor (DEVELOPER) experiment via POST /experiments (never sends a status, never launches, creates no variations), then optionally attaches goals. Idempotent by name: if a non-archived experiment with the same name already exists on the site it is reused, not duplicated — its baseURL/type are NOT changed unless updateExisting:true (drafts only), and the response says so. Confirm the site, name and baseURL with the user before calling. Returns the experiment id, status (verified DRAFT on read-back), baseURL, goals and an app link.",
+    inputSchema: zodToJsonSchema(CreateExperimentSchema)
+  },
+  {
+    name: "push_experiment_script",
+    description: "Writes an experiment's 'Experiment custom script' — the API field is confusingly named globalScript on PATCH /experiments/{id}, but it is scoped to that one experiment. It NEVER touches the project-wide Global custom script (trackingScript on /sites/{id}); it reads that script before and after and errors if it changed. The experiment script runs before experiment/variation code and regardless of targeting. Refuses to replace a different existing script without overwrite:true, and to write a non-draft experiment without confirmed:true. Verifies by read-back.",
+    inputSchema: zodToJsonSchema(PushExperimentScriptSchema)
   }
 ];
 
@@ -325,7 +369,7 @@ async function createVariation(args) {
   };
 }
 
-async function pushVariationCode(args) {
+export async function pushVariationCode(args) {
   const [js, css] = await Promise.all([
     readWorkspaceFile('variation.js'),
     readWorkspaceFile('variation.css')
@@ -376,12 +420,222 @@ async function pushVariationCode(args) {
   };
 }
 
+async function attachGoal(experimentId, goalId) {
+  const { data: experiment } = await apiRequest('GET', `/experiments/${experimentId}?optionalFields=goals`);
+  if (!experiment) throw new Error(`Experiment ${experimentId} not found`);
+  if (experiment.isArchived) throw new Error(`Experiment ${experimentId} ("${experiment.name}") is archived — refusing to attach a goal to it.`);
+
+  const before = Array.isArray(experiment.goals) ? [...experiment.goals] : [];
+  if (before.includes(goalId)) {
+    return { experimentId, experimentName: experiment.name, attached: false, note: 'already attached', goals: before };
+  }
+
+  // PATCH replaces the whole goals list, so send everything already there plus the new one.
+  const after = [...before, goalId];
+  await apiRequest('PATCH', `/experiments/${experimentId}`, { goals: after });
+
+  const { data: readBack } = await apiRequest('GET', `/experiments/${experimentId}?optionalFields=goals`);
+  const readBackGoals = (readBack && readBack.goals) || [];
+  return {
+    experimentId,
+    experimentName: experiment.name,
+    attached: readBackGoals.includes(goalId),
+    lostGoals: before.filter(id => !readBackGoals.includes(id)),
+    before,
+    after: readBackGoals
+  };
+}
+
+async function createGoal(args) {
+  const filter = [
+    { field: 'siteId', operator: 'EQUAL', parameters: [args.siteId] },
+    { field: 'name', operator: 'EQUAL', parameters: [args.name] }
+  ];
+  const { data: sameName } = await apiRequest('GET', `/goals${buildQuery({ perPage: 50, filter })}`);
+  const matches = (Array.isArray(sameName) ? sameName : []).filter(g => g.name === args.name && !g.isArchived);
+
+  const clash = matches.find(g => g.type !== 'CUSTOM');
+  if (clash) {
+    throw new Error(`A ${clash.type} goal named "${args.name}" already exists on site ${args.siteId} (id ${clash.id}). Pick a different name so the two are distinguishable in results.`);
+  }
+
+  let goal = matches[0];
+  const created = !goal;
+  if (created) {
+    const { data } = await apiRequest('POST', '/goals', {
+      name: args.name,
+      siteId: args.siteId,
+      type: 'CUSTOM',
+      hasMultipleConversions: args.hasMultipleConversions ?? false,
+      status: 'ACTIVE',
+      ...(args.description ? { description: args.description } : {})
+    });
+    goal = data;
+    if (!goal || !goal.id) throw new Error(`POST /goals returned no id: ${JSON.stringify(data)}`);
+  }
+
+  // Sequential on purpose: each attach is a read-modify-write of one experiment.
+  const attachments = [];
+  for (const experimentId of args.attachToExperimentIds || []) {
+    try {
+      attachments.push(await attachGoal(experimentId, goal.id));
+    } catch (err) {
+      attachments.push({ experimentId, attached: false, error: err.message });
+    }
+  }
+
+  return {
+    goalId: goal.id,
+    name: goal.name,
+    type: goal.type,
+    hasMultipleConversions: goal.hasMultipleConversions,
+    created,
+    note: created ? undefined : 'An existing CUSTOM goal with this name was reused.',
+    attachments,
+    usage: `Kameleoon.API.Goals.processConversion(${goal.id});`
+  };
+}
+
+async function createExperiment(args) {
+  if (args.mainGoalId != null && !(args.goalIds || []).includes(args.mainGoalId)) {
+    throw new Error(`mainGoalId ${args.mainGoalId} must also be listed in goalIds.`);
+  }
+
+  const { data: sites } = await apiRequest(
+    'GET',
+    `/sites${buildQuery({ perPage: 50, filter: [{ field: 'id', operator: 'EQUAL', parameters: [args.siteId] }] })}`
+  );
+  const site = Array.isArray(sites) ? sites.find(s => s.id === args.siteId) : null;
+  if (!site) throw new Error(`No site with id ${args.siteId} in this account. Check the account you are impersonating.`);
+
+  const filter = [
+    { field: 'siteId', operator: 'EQUAL', parameters: [args.siteId] },
+    { field: 'name', operator: 'EQUAL', parameters: [args.name] }
+  ];
+  const { data: sameName } = await apiRequest('GET', `/experiments${buildQuery({ perPage: 50, filter })}`, null, 30000);
+  let experiment = (Array.isArray(sameName) ? sameName : []).find(e => e.name === args.name && !e.isArchived);
+  const created = !experiment;
+
+  let updated;
+  if (!created && args.updateExisting) {
+    if (String(experiment.status).toUpperCase() !== 'DRAFT') {
+      throw new Error(`Experiment ${experiment.id} ("${experiment.name}") is ${experiment.status}, not a draft — refusing to change its baseURL/type. Edit it in the app if that is really intended.`);
+    }
+    const patch = {};
+    if (experiment.baseURL !== args.baseURL) patch.baseURL = args.baseURL;
+    if (args.type && experiment.type !== args.type) patch.type = args.type;
+    if (Object.keys(patch).length) {
+      await apiRequest('PATCH', `/experiments/${experiment.id}`, patch);
+      updated = { before: { baseURL: experiment.baseURL, type: experiment.type }, requested: patch };
+    }
+  }
+
+  if (created) {
+    // No status field on purpose: the API defaults a new experiment to DRAFT.
+    const { data } = await apiRequest('POST', '/experiments', {
+      name: args.name,
+      siteId: site.id,
+      siteCode: site.code,
+      baseURL: args.baseURL,
+      type: args.type || 'DEVELOPER',
+      ...(args.description ? { description: args.description } : {})
+    });
+    if (!data || !data.id) throw new Error(`POST /experiments returned no id: ${JSON.stringify(data)}`);
+    experiment = data;
+  }
+
+  // Sequential on purpose: each attach is a read-modify-write of the experiment.
+  const attachments = [];
+  for (const goalId of args.goalIds || []) {
+    try {
+      attachments.push(await attachGoal(experiment.id, goalId));
+    } catch (err) {
+      attachments.push({ goalId, attached: false, error: err.message });
+    }
+  }
+  if (args.mainGoalId != null) {
+    await apiRequest('PATCH', `/experiments/${experiment.id}`, { mainGoalId: args.mainGoalId });
+  }
+
+  const { data: readBack, appTabUrl } = await apiRequest('GET', `/experiments/${experiment.id}?optionalFields=goals`);
+  const warnings = [];
+  if (String(readBack.status).toUpperCase() !== 'DRAFT') warnings.push(`Status is ${readBack.status}, not DRAFT — check the experiment in the app before doing anything else with it.`);
+  if (!created && readBack.baseURL !== args.baseURL) warnings.push(`Reused an existing experiment whose baseURL is ${readBack.baseURL}; the requested ${args.baseURL} was NOT applied${args.updateExisting ? '' : ' (pass updateExisting:true to change it)'}.`);
+  if (updated && updated.requested.type && readBack.type !== updated.requested.type) warnings.push(`type change to ${updated.requested.type} did not stick — the experiment is still ${readBack.type}. The API may not allow changing type after creation.`);
+  if (created && readBack.baseURL !== args.baseURL) warnings.push(`Read-back baseURL ${readBack.baseURL} differs from the requested ${args.baseURL}.`);
+
+  return {
+    experimentId: readBack.id,
+    name: readBack.name,
+    siteId: readBack.siteId,
+    siteCode: readBack.siteCode,
+    status: readBack.status,
+    type: readBack.type,
+    baseURL: readBack.baseURL,
+    goals: readBack.goals || [],
+    mainGoalId: readBack.mainGoalId ?? null,
+    created,
+    note: created ? undefined : 'An existing experiment with this name was reused.',
+    updated,
+    attachments,
+    warnings: warnings.length ? warnings : undefined,
+    experimentUrl: deriveExperimentUrl(appTabUrl, readBack.id)
+  };
+}
+
+async function pushExperimentScript(args) {
+  const { data: experiment, appTabUrl } = await apiRequest('GET', `/experiments/${args.experimentId}?optionalFields=globalScript`);
+  if (!experiment) throw new Error(`Experiment ${args.experimentId} not found`);
+  if (experiment.isArchived) throw new Error(`Experiment ${args.experimentId} ("${experiment.name}") is archived — refusing to write its script.`);
+  const isDraft = String(experiment.status).toUpperCase() === 'DRAFT';
+  if (!isDraft && args.confirmed !== true) {
+    throw new Error(`Experiment ${args.experimentId} ("${experiment.name}") is ${experiment.status}, not a draft. Its custom script would run for every visitor as soon as Kameleoon loads. Get an explicit yes from the user, then re-run with confirmed:true.`);
+  }
+
+  const existing = experiment.globalScript || '';
+  if (existing && existing !== args.code && !args.overwrite) {
+    throw new Error(`Experiment ${args.experimentId} already has a ${existing.length}-char custom script that differs from this one. Show the user what would be replaced and re-run with overwrite:true if they approve.`);
+  }
+
+  // Snapshot the project-wide script so we can prove it was not touched.
+  const siteScript = async () => {
+    const { data: site } = await apiRequest('GET', `/sites/${experiment.siteId}`);
+    return site ? site.trackingScript ?? null : null;
+  };
+  const siteBefore = await siteScript();
+
+  await apiRequest('PATCH', `/experiments/${args.experimentId}`, { globalScript: args.code });
+
+  const { data: readBack } = await apiRequest('GET', `/experiments/${args.experimentId}?optionalFields=globalScript`);
+  const siteAfter = await siteScript();
+  if (siteAfter !== siteBefore) {
+    throw new Error(`The project-wide Global custom script of site ${experiment.siteId} CHANGED during this call (before ${String(siteBefore).length} chars, after ${String(siteAfter).length}). This tool never writes it — check the site's global script in the app immediately.`);
+  }
+
+  const verified = readBack && readBack.globalScript === args.code;
+  return {
+    experimentId: args.experimentId,
+    experimentName: experiment.name,
+    status: experiment.status,
+    field: 'globalScript (Experiment custom script)',
+    bytes: args.code.length,
+    replaced: existing ? existing.length : 0,
+    verified,
+    siteGlobalScriptUnchanged: true,
+    warning: verified ? undefined : 'Read-back did not match what was sent — inspect the experiment in the app before relying on it.',
+    experimentUrl: deriveExperimentUrl(appTabUrl, args.experimentId)
+  };
+}
+
 /** Returns a tool result, or null if the name is not one of ours. */
 export async function handleKameleoonTool(name, rawArgs) {
   const run = async () => {
     if (name === 'list_kameleoon_experiments') return listExperiments(ListExperimentsSchema.parse(rawArgs || {}));
     if (name === 'create_kameleoon_variation') return createVariation(CreateVariationSchema.parse(rawArgs || {}));
     if (name === 'push_variation_code') return pushVariationCode(PushVariationCodeSchema.parse(rawArgs || {}));
+    if (name === 'create_kameleoon_goal') return createGoal(CreateGoalSchema.parse(rawArgs || {}));
+    if (name === 'create_kameleoon_experiment') return createExperiment(CreateExperimentSchema.parse(rawArgs || {}));
+    if (name === 'push_experiment_script') return pushExperimentScript(PushExperimentScriptSchema.parse(rawArgs || {}));
     return undefined;
   };
 

@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { broadcastCurrentFiles, replyCurrentFiles, getFiles } from './watcher.js';
+import { importTicket } from './ticket_import.js';
 
 let wss = null;
 const pendingEvaluations = new Map();
@@ -39,7 +40,12 @@ export function initWebSocketServer(port = 5678) {
           replyCurrentFiles(ws, data.tabId);
         } else if (data.type === 'status_result') {
           handleStatusResult(data);
-        } else if (['evaluate_result', 'click_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result', 'open_url_result', 'dom_result', 'viewport_result', 'network_result', 'clear_emulation_result', 'set_enabled_result', 'response_headers_result', 'lifecycle_timeline_result', 'kameleoon_api_result'].includes(data.type)) {
+        } else if (data.type === 'import_ticket') {
+          // Extension-initiated request (the popup's Import ticket button). This is the
+          // one inbound direction that expects a reply, so it correlates on the id the
+          // extension minted rather than through pendingEvaluations.
+          handleImportTicket(ws, data);
+        } else if (['evaluate_result', 'click_result', 'press_key_result', 'screenshot_result', 'mutation_log_result', 'tabs_result', 'activate_result', 'open_url_result', 'dom_result', 'viewport_result', 'network_result', 'clear_emulation_result', 'set_enabled_result', 'response_headers_result', 'lifecycle_timeline_result', 'kameleoon_api_result', 'scrape_ticket_result'].includes(data.type)) {
           handleExtensionResult(data);
         }
       } catch (err) {
@@ -53,6 +59,24 @@ export function initWebSocketServer(port = 5678) {
   });
 
   console.log(`WebSocket server listening on ws://0.0.0.0:${port} (Accessible via localhost and 127.0.0.1)`);
+}
+
+async function handleImportTicket(ws, data) {
+  const reply = (msg) => {
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'import_ticket_result', messageId: data.messageId, ...msg }));
+    }
+  };
+  try {
+    const result = await importTicket(data.ticket, getWorkspacePath());
+    console.log(`Imported HubSpot ticket ${data.ticket?.ticketId} -> ${result.folder} ` +
+      `(${result.imageCount}/${result.imageTotal} images, ${result.commentCount} comments)`);
+    for (const w of result.warnings) console.warn(`  ticket import warning: ${w}`);
+    reply({ result });
+  } catch (e) {
+    console.error(`Ticket import failed: ${e.message}`);
+    reply({ error: e.message });
+  }
 }
 
 export function broadcast(payload) {
@@ -127,6 +151,10 @@ export function clickElement(selector, tabId = null, offsetX = 0, offsetY = 0, t
   return sendExtensionRequest('click_element', { selector, targetTabId: tabId, offsetX, offsetY }, timeoutMs);
 }
 
+export function pressKey(key, tabId = null, shift = false, times = 1, delayMs = 150, timeoutMs = 15000) {
+  return sendExtensionRequest('press_key', { key, targetTabId: tabId, shift, times, delayMs }, timeoutMs);
+}
+
 export function toggleSimulation(enable) {
   broadcast({
     event: 'toggle_simulation',
@@ -160,6 +188,22 @@ export function getWorkspacePath() {
 // Only status + body come back; the session cookie never leaves the browser.
 export function kameleoonApiRequest({ method, url, body = null }, timeoutMs = 20000) {
   return sendExtensionRequest('kameleoon_api', { method, url, body }, timeoutMs);
+}
+
+// Asks the extension to scrape a HubSpot ticket by URL, finding or opening the tab.
+// Generous timeout: it may have to open the tab and wait for HubSpot's timeline to render.
+// 90s, not 60: the extension may spend up to 45s waiting for the ticket to render and
+// still has the scrape and the image-URL resolution to do after that.
+export function scrapeTicket(url, timeoutMs = 90000) {
+  return sendExtensionRequest('scrape_ticket', { url }, timeoutMs);
+}
+
+// Scrape + write, for the MCP tool. The popup button path does the same two steps from
+// the other side (extension scrapes, then sends import_ticket here).
+export async function importHubspotTicketByUrl(url) {
+  const scraped = await scrapeTicket(url);
+  const result = await importTicket(scraped.ticket, getWorkspacePath());
+  return { ...result, openedTab: scraped.openedTab, tabId: scraped.tabId };
 }
 
 export function getStatus(timeoutMs = 5000) {

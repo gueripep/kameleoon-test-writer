@@ -5,7 +5,6 @@ import { broadcast, reloadPage } from './server.js';
 
 let watcher = null;
 const currentFiles = new Map();
-let currentTargeting = null;
 let currentWorkspacePath = null;
 let isReady = false;
 
@@ -25,19 +24,7 @@ function broadcastState() {
 
 async function processFile(filePath) {
   try {
-    const fileName = path.basename(filePath);
     const ext = path.extname(filePath).toLowerCase();
-
-    if (fileName === 'targeting.js') {
-      const raw = (await fs.readFile(filePath, 'utf-8')).trim();
-      currentTargeting = raw || null;
-      console.log('Updated targeting script');
-      broadcast({
-        event: 'config_update',
-        payload: { targeting: currentTargeting }
-      });
-      return;
-    }
 
     const content = await fs.readFile(filePath, 'utf-8');
     
@@ -76,8 +63,7 @@ async function processFile(filePath) {
           type,
           content: wrappedContent,
           timestamp: Date.now(),
-          filePath,
-          targeting: currentTargeting
+          filePath
         }
       });
       broadcastState();
@@ -107,13 +93,7 @@ export function initWatcher(workspacePath) {
   watcher.on('add', processFile);
   watcher.on('change', processFile);
   watcher.on('unlink', (filePath) => {
-    const name = path.basename(filePath);
-    if (name === 'targeting.js') {
-      currentTargeting = null;
-      broadcast({ event: 'config_update', payload: { targeting: null } });
-    } else {
-      currentFiles.delete(filePath);
-    }
+    currentFiles.delete(filePath);
     broadcastState();
   });
 
@@ -132,20 +112,13 @@ export function broadcastCurrentFiles(targetTabId) {
         content: fileData.content,
         timestamp: Date.now(),
         filePath,
-        targetTabId,
-        targeting: currentTargeting
+        targetTabId
       }
     });
   }
 }
 
 export function replyCurrentFiles(ws, targetTabId) {
-  // Send targeting config first so extension evaluates it before injecting files
-  ws.send(JSON.stringify({
-    event: 'config_update',
-    payload: { targeting: currentTargeting }
-  }));
-
   // Send state so extension knows workspace context
   const files = Array.from(currentFiles.keys()).map(p => path.relative(currentWorkspacePath, p));
   ws.send(JSON.stringify({
@@ -165,8 +138,7 @@ export function replyCurrentFiles(ws, targetTabId) {
         content: fileData.content,
         timestamp: Date.now(),
         filePath,
-        targetTabId,
-        targeting: currentTargeting
+        targetTabId
       }
     });
     if (ws.readyState === 1) {

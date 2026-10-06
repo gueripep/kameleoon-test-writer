@@ -19,18 +19,24 @@ const MAX_RECONNECT_DELAY = 60000;
 // so it survives service-worker restarts and is available before the WS reconnects.
 // Used by the webNavigation.onCommitted listener to inject at ~document_start timing.
 let cachedFiles = new Map();
-let cachedTargeting = null; // JS expression evaluated in the tab; injection skipped if falsy
-let lastTargetingResult = undefined; // last resolved targeting value; undefined = never evaluated
 const earlyInjectedTabs = new Set(); // tabIds already injected for the current navigation
 
-chrome.storage.local.get({ cachedVariationFiles: [], cachedTargeting: null, pinnedTabId: null }, (data) => {
-  pinnedTabId = data.pinnedTabId || null;
-  for (const item of data.cachedVariationFiles || []) {
-    if (item && item.filePath && item.type && typeof item.content === 'string') {
-      cachedFiles.set(item.filePath, { type: item.type, content: item.content });
+// Resolves once the persisted state above is back in memory. The service
+// worker can be woken by an incoming WS message before this load finishes, so
+// anything that reads pinnedTabId or isEnabled must await it — otherwise the
+// pin looks unset (falling back to whatever tab is active) and injection looks
+// enabled when the user has turned it off.
+const storageReady = new Promise((resolve) => {
+  chrome.storage.local.get({ cachedVariationFiles: [], pinnedTabId: null, enabled: true }, (data) => {
+    pinnedTabId = data.pinnedTabId || null;
+    isEnabled = data.enabled;
+    for (const item of data.cachedVariationFiles || []) {
+      if (item && item.filePath && item.type && typeof item.content === 'string') {
+        cachedFiles.set(item.filePath, { type: item.type, content: item.content });
+      }
     }
-  }
-  cachedTargeting = data.cachedTargeting || null;
+    resolve();
+  });
 });
 
 function persistCachedFiles() {
@@ -40,17 +46,17 @@ function persistCachedFiles() {
   chrome.storage.local.set({ cachedVariationFiles: arr });
 }
 
-function persistTargeting() {
-  chrome.storage.local.set({ cachedTargeting });
-  lastTargetingResult = undefined; // reset until next injection evaluates it
-}
-
 // Resolves the tab the bridge should act on: the pinned tab if one is set and
-// still open, otherwise the active tab of the current window.
+// still open, otherwise the active tab of the current window. A pin that points
+// at a closed tab is cleared rather than silently falling through, so the
+// fallback only ever applies when there is genuinely no target.
 async function resolveTargetTab() {
+  await storageReady;
   if (pinnedTabId) {
     const tab = await chrome.tabs.get(pinnedTabId).catch(() => null);
     if (tab) return tab;
+    console.warn(`[Local CRO Bridge] Pinned target tab ${pinnedTabId} is gone; clearing pin.`);
+    await clearTargetTab();
   }
   const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return activeTabs[0] || null;
@@ -109,11 +115,10 @@ function matchesUrl(tabUrl, targetUrl) {
   }
 }
 
-// Initialize isEnabled and setup reconnection alarm
-chrome.storage.local.get({ enabled: true }, (data) => {
-  isEnabled = data.enabled;
+// Connect and set up the reconnection heartbeat once persisted state is loaded
+storageReady.then(() => {
   if (isEnabled) connect();
-  
+
   // Reconnection heartbeat every minute to catch any missed states
   chrome.alarms.create('reconnectHeartbeat', { periodInMinutes: 1 });
 });
@@ -152,7 +157,10 @@ function connect() {
   socket.onmessage = async (event) => {
     try {
       const data = JSON.parse(event.data);
-      if (data.event === 'hot_reload') {
+      if (data.type === 'import_ticket_result') {
+        // Reply to an extension-initiated request, keyed on type rather than event.
+        handleImportTicketResult(data);
+      } else if (data.event === 'hot_reload') {
         handleHotReload(data.payload);
       } else if (data.event === 'state_update') {
         currentState = data.payload;
@@ -161,15 +169,26 @@ function connect() {
         handleEvaluateJs(data.payload);
       } else if (data.event === 'click_element') {
         handleClickElement(data.payload);
+      } else if (data.event === 'press_key') {
+        handlePressKey(data.payload);
       } else if (data.event === 'toggle_simulation') {
         handleToggleSimulation(data.payload);
       } else if (data.event === 'reload_page') {
-        const targetTabId = data.payload.targetTabId;
-        if (targetTabId) {
-          chrome.tabs.reload(targetTabId);
+        // No point reloading if injection is off — a reload would just strip
+        // the variation from the page and leave the user on a bare control.
+        await storageReady;
+        if (!isEnabled) {
+          console.log('[Local CRO Bridge] reload_page ignored: injection is disabled.');
+          return;
+        }
+        const explicitTabId = data.payload.targetTabId;
+        const tab = explicitTabId ? null : await resolveTargetTab();
+        const reloadTabId = explicitTabId || tab?.id;
+        if (reloadTabId) {
+          console.log(`[Local CRO Bridge] Reloading tab ${reloadTabId}${pinnedTabId === reloadTabId ? ' (pinned CRO target)' : ' (no pinned target — active tab)'}`);
+          chrome.tabs.reload(reloadTabId);
         } else {
-          const tab = await resolveTargetTab();
-          if (tab) chrome.tabs.reload(tab.id);
+          console.warn('[Local CRO Bridge] reload_page: no target tab to reload.');
         }
       } else if (data.event === 'capture_screenshot') {
         handleCaptureScreenshot(data.payload);
@@ -181,11 +200,6 @@ function connect() {
         handleGetStatus(data.payload);
       } else if (data.event === 'set_enabled') {
         handleSetEnabled(data.payload);
-      } else if (data.event === 'config_update') {
-        if ('targeting' in data.payload) {
-          cachedTargeting = data.payload.targeting || null;
-          persistTargeting();
-        }
       } else if (data.event === 'list_tabs') {
         handleListTabs(data.payload);
       } else if (data.event === 'activate_tab') {
@@ -202,6 +216,8 @@ function connect() {
         handleReadResponseHeaders(data.payload);
       } else if (data.event === 'arm_lifecycle_capture') {
         handleArmLifecycleCapture(data.payload);
+      } else if (data.event === 'scrape_ticket') {
+        handleScrapeTicket(data.payload);
       } else if (data.event === 'kameleoon_api') {
         handleKameleoonApi(data.payload);
       }
@@ -239,58 +255,8 @@ function connect() {
   };
 }
 
-async function evaluateTargeting(tabId) {
-  if (!cachedTargeting || !cachedTargeting.trim()) return true;
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (code) => {
-        return new Promise((resolve) => {
-          const key = '__kamLocalSetTargeting';
-          window[key] = (value) => {
-            delete window[key];
-            resolve(!!value);
-          };
-          const script = document.createElement('script');
-          script.textContent = `(function(){
-            const setTargeting = (v) => window['${key}'] && window['${key}'](v);
-            const Kameleoon = { API: { Core: {
-              runWhenElementPresent: (selector, cb) => {
-                const el = document.querySelector(selector);
-                if (el) { cb(el); return; }
-                const obs = new MutationObserver(() => {
-                  const found = document.querySelector(selector);
-                  if (found) { obs.disconnect(); cb(found); }
-                });
-                obs.observe(document.documentElement, { childList: true, subtree: true });
-              }
-            }}};
-            ${code}
-          })();`;
-          document.documentElement.appendChild(script);
-          script.remove();
-        });
-      },
-      args: [cachedTargeting],
-      world: 'MAIN'
-    });
-    lastTargetingResult = results[0]?.result === true;
-    return lastTargetingResult;
-  } catch (e) {
-    console.warn(`[Local CRO Bridge] Could not evaluate targeting for tab ${tabId}:`, e);
-    lastTargetingResult = false;
-    return false;
-  }
-}
-
 async function handleHotReload(payload) {
   if (!isEnabled) return;
-
-  // Sync targeting from payload so it's always in step with the variation files.
-  if ('targeting' in payload) {
-    cachedTargeting = payload.targeting || null;
-    persistTargeting();
-  }
 
   // Keep cache in sync so webNavigation.onCommitted can inject at document_start
   // on subsequent navigations.
@@ -311,12 +277,6 @@ async function handleHotReload(payload) {
 
   for (const targetId of targetIds) {
     try {
-      const passes = await evaluateTargeting(targetId);
-      if (!passes) {
-        console.log(`[Local CRO Bridge] Targeting condition not met for tab ${targetId}, skipping injection.`);
-        continue;
-      }
-
       // Record injection state
       const tab = await chrome.tabs.get(targetId);
       injectedTabs.set(targetId, {
@@ -519,10 +479,133 @@ async function handleClickElement(payload) {
   }
 }
 
+// CDP key definitions: windowsVirtualKeyCode is what moves focus on Tab; `text` is what types a character
+const PRESS_KEY_DEFINITIONS = {
+  Tab: { code: 'Tab', keyCode: 9 },
+  Enter: { code: 'Enter', keyCode: 13, text: '\r' },
+  Escape: { code: 'Escape', keyCode: 27 },
+  Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+  Backspace: { code: 'Backspace', keyCode: 8 },
+  ArrowUp: { code: 'ArrowUp', keyCode: 38 },
+  ArrowDown: { code: 'ArrowDown', keyCode: 40 },
+  ArrowLeft: { code: 'ArrowLeft', keyCode: 37 },
+  ArrowRight: { code: 'ArrowRight', keyCode: 39 },
+  Home: { code: 'Home', keyCode: 36 },
+  End: { code: 'End', keyCode: 35 }
+};
+
+async function handlePressKey(payload) {
+  if (!isEnabled) return;
+  let tabId = payload.targetTabId;
+  let weAttached = false;
+  try {
+    if (!tabId) {
+      const tab = await resolveTargetTab();
+      if (tab) tabId = tab.id;
+    }
+    if (!tabId) throw new Error('No target tab found');
+
+    const targetTab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!targetTab) throw new Error(`Tab with ID ${tabId} not found`);
+    if (targetTab.url.startsWith('chrome://')) throw new Error('Cannot access a chrome:// URL');
+
+    const named = PRESS_KEY_DEFINITIONS[payload.key];
+    if (!named && [...payload.key].length !== 1) {
+      throw new Error(`Unsupported key "${payload.key}". Use a single character or one of: ${Object.keys(PRESS_KEY_DEFINITIONS).join(', ')}`);
+    }
+    const def = named
+      ? { key: payload.key, ...named }
+      : { key: payload.key, code: '', keyCode: payload.key.toUpperCase().charCodeAt(0), text: payload.key };
+
+    // Focus events are deferred while the window lacks OS focus, so bring it forward like click_element does
+    await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+    if (targetTab.windowId != null) {
+      await chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
+    }
+
+    weAttached = !attachedDebuggers.has(tabId);
+    await attachDebugger(tabId);
+
+    const describeFocus = async () => {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const el = document.activeElement;
+          if (!el || el === document.body) return { tag: el ? 'body' : null };
+          const rect = el.getBoundingClientRect();
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || undefined,
+            role: el.getAttribute('role') || undefined,
+            label: (el.getAttribute('aria-label') || el.textContent || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+            href: el.getAttribute('href') || undefined,
+            visible: rect.width > 0 && rect.height > 0,
+            inViewport: rect.bottom > 0 && rect.top < window.innerHeight
+          };
+        },
+        world: 'MAIN'
+      });
+      return results[0]?.result;
+    };
+
+    const modifiers = payload.shift ? 8 : 0;
+    const times = Math.max(1, Math.min(payload.times || 1, 50));
+    const steps = [];
+    const before = await describeFocus();
+
+    for (let i = 0; i < times; i++) {
+      // a key with text must be keyDown (types the character); rawKeyDown is the non-typing variant
+      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+        type: def.text ? 'keyDown' : 'rawKeyDown',
+        key: def.key,
+        code: def.code,
+        windowsVirtualKeyCode: def.keyCode,
+        nativeVirtualKeyCode: def.keyCode,
+        text: def.text,
+        unmodifiedText: def.text,
+        modifiers
+      });
+      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: def.key,
+        code: def.code,
+        windowsVirtualKeyCode: def.keyCode,
+        nativeVirtualKeyCode: def.keyCode,
+        modifiers
+      });
+      await new Promise((resolve) => setTimeout(resolve, payload.delayMs ?? 150));
+      steps.push(await describeFocus());
+    }
+
+    if (weAttached) {
+      chrome.debugger.detach({ tabId }, () => { attachedDebuggers.delete(tabId); });
+    }
+
+    if (socket.readyState === WebSocket.OPEN && payload.messageId) {
+      socket.send(JSON.stringify({
+        type: 'press_key_result',
+        messageId: payload.messageId,
+        result: { success: true, tabId, key: payload.key, shift: !!payload.shift, focusBefore: before, focusAfterEachPress: steps }
+      }));
+    }
+  } catch (e) {
+    if (weAttached && tabId) {
+      chrome.debugger.detach({ tabId }, () => { attachedDebuggers.delete(tabId); });
+    }
+    if (socket.readyState === WebSocket.OPEN && payload.messageId) {
+      socket.send(JSON.stringify({
+        type: 'press_key_result',
+        messageId: payload.messageId,
+        error: e.toString()
+      }));
+    }
+  }
+}
+
 async function handleToggleSimulation(payload) {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tabs.length === 0) return;
-  const url = new URL(tabs[0].url);
+  const tab = await resolveTargetTab();
+  if (!tab) return;
+  const url = new URL(tab.url);
   
   if (payload.enable) {
     await chrome.cookies.set({
@@ -538,7 +621,7 @@ async function handleToggleSimulation(payload) {
     });
   }
   
-  chrome.tabs.reload(tabs[0].id);
+  chrome.tabs.reload(tab.id);
 }
 
 async function handleReadMutationLog(payload) {
@@ -1304,9 +1387,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     
-    // Reload active tab
-    chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs.length > 0) chrome.tabs.reload(tabs[0].id);
+    // Reload the CRO target tab (falls back to the active tab if none is pinned)
+    resolveTargetTab().then(tab => {
+      if (tab) chrome.tabs.reload(tab.id);
     });
   } else if (message.type === 'SET_TARGET_TAB') {
     (async () => {
@@ -1324,7 +1407,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })();
   } else if (message.type === 'GET_DETAILED_STATE') {
     (async () => {
-      const targetingResult = !cachedTargeting || !cachedTargeting.trim() ? null : lastTargetingResult;
       const targetTab = pinnedTabId ? await chrome.tabs.get(pinnedTabId).catch(() => null) : null;
       // Pinned tab was closed — drop the stale reference.
       if (pinnedTabId && !targetTab) await clearTargetTab();
@@ -1333,7 +1415,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         connectionStatus,
         currentState,
         injectedTabs: Array.from(injectedTabs.values()),
-        targetingResult,
         targetTab: targetTab ? { id: targetTab.id, url: targetTab.url, title: targetTab.title } : null
       });
     })();
@@ -1351,11 +1432,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function injectCachedFiles(tabId) {
-  const passes = await evaluateTargeting(tabId);
-  if (!passes) {
-    console.log(`[Local CRO Bridge] Targeting condition not met for tab ${tabId}, skipping injection.`);
-    return;
-  }
   let injectedAny = false;
   // CSS first — order doesn't affect timing for stylesheets.
   for (const fileData of cachedFiles.values()) {
@@ -1447,5 +1523,253 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         socket.addEventListener('open', waitAndSend);
       }
     }
+  }
+});
+
+// --- HubSpot ticket import ---------------------------------------------------------
+// Scrapes the ticket the user is looking at and hands it to the daemon, which does the
+// writing and the image downloads. Nothing imported is ever injected or eval'd: the
+// daemon writes it under a dot-prefixed folder the watcher skips.
+//
+// Unlike the Kameleoon API proxy this does not hunt for a tab — the button lives in the
+// popup of the ticket tab, so the tab id comes from the caller. Like the proxy, it never
+// automates login: if HubSpot has logged the user out the scrape simply finds nothing
+// and says so rather than trying to fix it.
+
+const HUBSPOT_TICKET_RE = /^https:\/\/app\.hubspot\.com\/contacts\/(\d+)\/record\/0-5\/(\d+)\b/;
+
+const pendingImports = new Map();
+
+export const parseHubspotTicketUrl = (url) => {
+  const m = HUBSPOT_TICKET_RE.exec(String(url || ''));
+  return m ? { portalId: m[1], ticketId: m[2] } : null;
+};
+
+// Runs inside the ticket tab. Route 2 (DOM scrape) — route 1, HubSpot's internal API,
+// needs a CSRF token lifted out of the session cookies, which this bridge deliberately
+// does not touch. The returned `route` makes a future breakage diagnosable instead of
+// just yielding an empty ticket.
+const scrapeHubspotTicket = (ticketId, portalId) => {
+  const DATE = /(\d{1,2}\s+\w{3,10}\s+\d{4}(?:\s+at)?\s+\d{1,2}:\d{2}(?:\s*[AP]M)?(?:\s+[A-Z]{2,4})?)/;
+  const q = (root, sel) => root.querySelector(sel);
+
+  // HubSpot renders a note body two ways and which one you get is not about the ticket:
+  // an editable ProseMirror surface ([data-test-id="rte-content"]), or a click-to-edit
+  // preview whose text sits in a SanitizedText container under editable-body-button.
+  // Both occur in practice, on different tickets. Handle both, and scope
+  // the SanitizedText fallback to the note — comments use the same class.
+  const pickNoteBody = (scope) => {
+    if (!scope) return null;
+    const rte = q(scope, '[data-test-id="rte-content"]');
+    if (rte) return { el: rte, via: 'note-rte' };
+    const sanitized = [...scope.querySelectorAll('[class*="SanitizedText"]')]
+      .filter((e) => !e.closest('[data-test-id="callComments-container"]') &&
+                     !e.closest('[data-test-id^="comment-"]'));
+    return sanitized.length ? { el: sanitized[0], via: 'note-sanitized' } : null;
+  };
+
+  const noteEvent = q(document, '[data-test-id="timeline-note-event"]');
+  const body = pickNoteBody(noteEvent) || pickNoteBody(document);
+  const bodyEl = body ? body.el : null;
+
+  const comments = [...document.querySelectorAll('[data-test-id^="comment-"]')].map((c) => {
+    const msg = q(c, '[data-test-id="comments-messageContainer"]');
+    const header = q(c, '[data-test-id="compact-comment-header"]');
+    const flat = (c.innerText || '').replace(/\s+/g, ' ').slice(0, 160);
+    return {
+      author: header ? header.textContent.trim() : '',
+      timestamp: (flat.match(DATE) || [])[1] || '',
+      // Drop the "Reply" affordance HubSpot renders inside the comment body.
+      html: msg ? msg.innerHTML.replace(/<a\b[^>]*data-test-id="comments-replyButton"[\s\S]*?<\/a>/gi, '') : ''
+    };
+  }).filter((c) => c.html);
+
+  // Fall back to the Description property when there is no Note. HubSpot renders an
+  // empty one as the placeholder "Ticket summary --", which is not content.
+  const descEl = q(document, '[data-test-id="detailed_description"]');
+  const descText = descEl ? (descEl.innerText || '').replace(/\s+/g, ' ').trim() : '';
+  const descUsable = descText && !/^Ticket summary\s*-*$/i.test(descText);
+
+  const heading = q(document, '[data-test-id="record-highlight-title"]');
+  const subject = (heading ? heading.textContent : document.title || '').trim();
+
+  const route = body ? `dom-scrape:${body.via}` : (descUsable ? 'dom-scrape:description' : 'dom-scrape:none');
+
+  return {
+    ticketId,
+    portalId,
+    url: location.href.split('?')[0],
+    subject,
+    bodyHtml: bodyEl ? bodyEl.innerHTML : (descUsable ? descEl.innerHTML : ''),
+    comments,
+    route,
+    // Diagnosis only: an email-thread ticket has timeline events but no note/comments.
+    timelineEventCount: document.querySelectorAll('[data-test-id="timeline-preview-event"]').length
+  };
+};
+
+// Inline images arrive as api.hubspot.com/filemanager/.../signed-url-redirect, which
+// 302s to a pre-signed CloudFront URL. The redirect hop needs the HubSpot session (an
+// anonymous fetch gets an HTML error page back), but the CloudFront URL it lands on
+// needs no auth at all — so resolve it here and send the daemon the final URL.
+//
+// This runs in the service worker rather than in the page: the page is subject to CORS
+// on the CloudFront hop and the fetch throws, whereas the worker has <all_urls> host
+// permissions. It also keeps the image bytes off the WebSocket — the daemon downloads
+// them, which is the whole reason these are URLs and not base64.
+//
+// The signature is short-lived. It is resolved at import time and never persisted.
+const HUBSPOT_REDIRECT_RE = /api\.hubspot\.com\/filemanager\/.*?signed-url-redirect/;
+
+async function resolveTicketImageUrls(html) {
+  if (!html) return html;
+  const srcs = [...html.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)]
+    .map((m) => m[1])
+    .filter((u) => HUBSPOT_REDIRECT_RE.test(u));
+  let out = html;
+  for (const src of [...new Set(srcs)]) {
+    let finalUrl = src;
+    try {
+      const res = await fetch(src.replace(/&amp;/g, '&'), { credentials: 'include', redirect: 'follow' });
+      if (res.ok && res.url) finalUrl = res.url;
+    } catch (e) { /* leave the original; the daemon reports it as a warning */ }
+    out = out.split(src).join(finalUrl.replace(/&/g, '&amp;'));
+  }
+  return out;
+}
+
+// Shared by the popup button and the scrape_ticket event: read one already-open ticket
+// tab and resolve its image URLs. The caller decides where the tab came from.
+async function scrapeTicketFromTab(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  const parsed = parseHubspotTicketUrl(tab && tab.url);
+  if (!parsed) throw new Error(`Tab ${tabId} is not a HubSpot ticket record (${tab && tab.url}).`);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    func: scrapeHubspotTicket,
+    args: [parsed.ticketId, parsed.portalId]
+  });
+  const ticket = results && results[0] ? results[0].result : null;
+  if (!ticket) throw new Error('Could not read the ticket tab — it may have navigated away.');
+
+  ticket.bodyHtml = await resolveTicketImageUrls(ticket.bodyHtml);
+  for (const c of ticket.comments) c.html = await resolveTicketImageUrls(c.html);
+  return ticket;
+}
+
+// Finds the tab already showing this ticket, or opens one and waits for the record to
+// render. HubSpot renders the timeline well after load fires, so readiness is the note
+// body actually existing, not tab.status === 'complete'.
+async function findOrOpenTicketTab(url, timeoutMs = 45000) {
+  const parsed = parseHubspotTicketUrl(url);
+  if (!parsed) throw new Error(`Not a HubSpot ticket record URL: ${url}`);
+
+  const all = await chrome.tabs.query({});
+  const existing = all.find((t) => {
+    const p = parseHubspotTicketUrl(t.url);
+    return p && p.ticketId === parsed.ticketId;
+  });
+
+  let tabId = existing ? existing.id : null;
+  let opened = false;
+  if (tabId === null) {
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+    opened = true;
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  let lastState = 'never checked';
+  while (Date.now() < deadline) {
+    try {
+      const probe = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: () => {
+          // Tickets come in two shapes: a Note body plus comments, or a Description
+          // property plus an email thread. Treat either as rendered — deciding whether
+          // the content is usable is the scrape's job, not the wait's.
+          const note = document.querySelector('[data-test-id="rte-content"], [data-test-id="timeline-note-event"]');
+          const desc = document.querySelector('[data-test-id="detailed_description"]');
+          const events = document.querySelectorAll('[data-test-id="timeline-preview-event"]').length;
+          const login = /\/login|\/signup/.test(location.pathname);
+          return { ready: !!note || !!desc || events > 0, login, path: location.pathname };
+        }
+      });
+      const r = probe && probe[0] ? probe[0].result : null;
+      if (r) {
+        // Never automate the login — say so and stop.
+        if (r.login) throw new Error('HubSpot redirected to login. Log in in Chrome, then retry.');
+        if (r.ready) return { tabId, opened, ticketId: parsed.ticketId };
+        lastState = `rendered but no ticket body yet (${r.path})`;
+      }
+    } catch (e) {
+      if (/redirected to login/.test(e.message)) throw e;
+      lastState = e.message; // tab still navigating; executeScript throws mid-load
+    }
+    await new Promise((r) => setTimeout(r, 750));
+  }
+  throw new Error(`Ticket ${parsed.ticketId} did not render within ${timeoutMs}ms — last state: ${lastState}`);
+}
+
+async function handleImportTicket(tabId) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    throw new Error('The daemon is offline — start the CRO bridge and try again.');
+  }
+
+  const ticket = await scrapeTicketFromTab(tabId);
+
+  // The daemon downloads the images, so this can take a while; it is well past the
+  // 5s that daemon->extension calls use.
+  const messageId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingImports.delete(messageId);
+      reject(new Error('The daemon did not answer within 60s.'));
+    }, 60000);
+    pendingImports.set(messageId, { resolve, reject, timeout });
+    socket.send(JSON.stringify({ type: 'import_ticket', messageId, ticket }));
+  });
+}
+
+// Daemon-initiated counterpart of the popup button: the MCP tool passes a ticket URL,
+// this finds or opens the tab and returns the scraped ticket; the daemon writes it.
+async function handleScrapeTicket(payload) {
+  const reply = (msg) => {
+    if (socket && socket.readyState === WebSocket.OPEN && payload.messageId) {
+      socket.send(JSON.stringify({ type: 'scrape_ticket_result', messageId: payload.messageId, ...msg }));
+    }
+  };
+  try {
+    const { tabId, opened, ticketId } = await findOrOpenTicketTab(payload.url);
+    const ticket = await scrapeTicketFromTab(tabId);
+    // Only a tab this call opened is closed, and only on success — a failure leaves it
+    // open so the state that caused it can be inspected.
+    if (opened) await chrome.tabs.remove(tabId).catch(() => {});
+    reply({ result: { ticket, tabId, openedTab: opened, ticketId } });
+  } catch (e) {
+    reply({ error: e.message || String(e) });
+  }
+}
+
+export function handleImportTicketResult(data) {
+  const pending = pendingImports.get(data.messageId);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingImports.delete(data.messageId);
+  if (data.error) pending.reject(new Error(data.error));
+  else pending.resolve(data.result);
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'IMPORT_TICKET') {
+    (async () => {
+      try {
+        sendResponse({ ok: true, result: await handleImportTicket(message.tabId) });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message || String(e) });
+      }
+    })();
+    return true;
   }
 });

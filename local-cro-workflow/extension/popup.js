@@ -1,13 +1,18 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const toggle = document.getElementById('toggle-enabled');
   const daemonBadge = document.getElementById('daemon-badge');
-  const targetingCard = document.getElementById('targeting-card');
-  const targetingBadge = document.getElementById('targeting-badge');
-  const targetingLabel = document.getElementById('targeting-label');
   const targetTabBtn = document.getElementById('target-tab-btn');
   const targetInfo = document.getElementById('target-info');
   const targetInfoText = document.getElementById('target-info-text');
   const targetClearBtn = document.getElementById('target-clear-btn');
+  const ticketCard = document.getElementById('ticket-card');
+  const ticketSubject = document.getElementById('ticket-subject');
+  const ticketImportBtn = document.getElementById('ticket-import-btn');
+  const ticketResult = document.getElementById('ticket-result');
+
+  const HUBSPOT_TICKET_RE = /^https:\/\/app\.hubspot\.com\/contacts\/(\d+)\/record\/0-5\/(\d+)\b/;
+  let ticketTabId = null;
+  let importing = false;
 
 
   // Initial State Load
@@ -37,14 +42,68 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  ticketImportBtn.addEventListener('click', () => {
+    if (importing || ticketTabId === null) return;
+    importing = true;
+    ticketImportBtn.disabled = true;
+    ticketImportBtn.textContent = 'Importing\u2026';
+    ticketResult.style.display = 'none';
+
+    chrome.runtime.sendMessage({ type: 'IMPORT_TICKET', tabId: ticketTabId }, (response) => {
+      importing = false;
+      ticketImportBtn.disabled = false;
+      ticketImportBtn.textContent = '\u2b07\ufe0e Import ticket';
+      ticketResult.style.display = 'block';
+
+      if (!response) {
+        ticketResult.className = 'ticket-result err';
+        ticketResult.textContent = 'No response from the extension background worker.';
+        return;
+      }
+      if (!response.ok) {
+        ticketResult.className = 'ticket-result err';
+        ticketResult.textContent = response.error;
+        return;
+      }
+      const r = response.result;
+      const bits = [`Imported to ${r.folder} (overwrites any earlier import)`];
+      if (r.imageTotal) bits.push(`${r.imageCount}/${r.imageTotal} images`);
+      if (r.commentCount) bits.push(`${r.commentCount} comments`);
+      if (r.warnings && r.warnings.length) bits.push(`\u26a0 ${r.warnings.join('; ')}`);
+      ticketResult.className = r.warnings && r.warnings.length ? 'ticket-result err' : 'ticket-result ok';
+      ticketResult.textContent = bits.join(' \u00b7 ');
+    });
+  });
+
+  // The daemon does the writing, so an offline daemon means the button cannot work.
+  async function refreshTicketCard(connectionStatus) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const match = tab && HUBSPOT_TICKET_RE.exec(tab.url || '');
+    if (!match) {
+      ticketCard.style.display = 'none';
+      ticketTabId = null;
+      return;
+    }
+    ticketTabId = tab.id;
+    ticketCard.style.display = 'block';
+    ticketSubject.textContent = tab.title || `Ticket ${match[2]}`;
+    ticketSubject.title = tab.title || '';
+
+    if (importing) return;
+    const online = connectionStatus === 'connected';
+    ticketImportBtn.disabled = !online;
+    ticketImportBtn.textContent = online ? '\u2b07\ufe0e Import ticket' : 'Daemon offline';
+  }
+
   async function refreshUI() {
     chrome.runtime.sendMessage({ type: 'GET_DETAILED_STATE' }, (response) => {
       if (!response) return;
 
-      const { isEnabled, connectionStatus, targetingResult, targetTab } = response;
+      const { isEnabled, connectionStatus, targetTab } = response;
 
       toggle.checked = isEnabled;
       updateHeaderUI(connectionStatus);
+      refreshTicketCard(connectionStatus);
 
       if (targetTab) {
         targetInfo.style.display = 'block';
@@ -52,27 +111,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         targetInfoText.title = targetTab.url;
       } else {
         targetInfo.style.display = 'none';
-      }
-
-      const isConnected = connectionStatus === 'connected';
-      targetingCard.style.display = isEnabled && isConnected ? 'block' : 'none';
-
-      if (targetingResult === null) {
-        targetingBadge.textContent = 'N/A';
-        targetingBadge.className = 'status-badge status-disconnected';
-        targetingLabel.textContent = 'No targeting condition set';
-      } else if (targetingResult === true) {
-        targetingBadge.textContent = 'TRUE';
-        targetingBadge.className = 'status-badge status-active';
-        targetingLabel.textContent = 'Visitor is included';
-      } else if (targetingResult === false) {
-        targetingBadge.textContent = 'FALSE';
-        targetingBadge.className = 'status-badge status-disabled';
-        targetingLabel.textContent = 'Visitor is excluded';
-      } else {
-        targetingBadge.textContent = '—';
-        targetingBadge.className = 'status-badge status-connecting';
-        targetingLabel.textContent = 'Evaluating…';
       }
     });
   }
