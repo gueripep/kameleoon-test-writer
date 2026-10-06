@@ -1,3 +1,4 @@
+import http from 'http';
 import { WebSocketServer } from 'ws';
 import { broadcastCurrentFiles, replyCurrentFiles, getFiles } from './watcher.js';
 import { importTicket } from './ticket_import.js';
@@ -7,8 +8,10 @@ const pendingEvaluations = new Map();
 
 export function initWebSocketServer(port = 5678) {
   try {
-    wss = new WebSocketServer({ port, host: '0.0.0.0' });
-    wss.on('error', (err) => {
+    const server = http.createServer(handleControlRequest);
+    wss = new WebSocketServer({ server });
+    server.listen(port, '0.0.0.0');
+    server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
         console.error(`\n!!! ERROR: Port ${port} is already in use.`);
         console.error(`Check if another instance of the Local CRO Bridge is running.`);
@@ -59,6 +62,34 @@ export function initWebSocketServer(port = 5678) {
   });
 
   console.log(`WebSocket server listening on ws://0.0.0.0:${port} (Accessible via localhost and 127.0.0.1)`);
+}
+
+// Control API for the VS Code extension. Loopback only, and a request carrying an Origin
+// (any web page) is refused, so a site open in Chrome cannot drive it.
+async function handleControlRequest(req, res) {
+  const send = (code, body) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  };
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  if (!loopback || req.headers.origin || req.headers['x-cro-client'] !== 'vscode') {
+    return send(403, { error: 'forbidden' });
+  }
+  try {
+    if (req.method === 'GET' && req.url === '/status') {
+      const { daemon, extensions, warning } = await getStatus(1500);
+      return send(200, { pid: daemon.pid, workspace: daemon.workspace, connectedExtensions: daemon.connectedExtensions, extensions, warning });
+    }
+    if (req.method !== 'POST') return send(404, { error: 'not found' });
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = raw ? JSON.parse(raw) : {};
+    if (req.url === '/enabled') return send(200, await setExtensionEnabled(Boolean(body.enabled)));
+    if (req.url === '/import-ticket') return send(200, await importHubspotTicketByUrl(String(body.url || '')));
+    send(404, { error: 'not found' });
+  } catch (e) {
+    send(500, { error: e.message });
+  }
 }
 
 async function handleImportTicket(ws, data) {

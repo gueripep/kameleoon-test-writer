@@ -83,6 +83,18 @@ For Claude Code, copy `experiments/.mcp.json.example` to `experiments/.mcp.json`
 
 To run it by hand instead, run `npm start` from `local-cro-workflow/`, or `node local-cro-workflow/cli/bin/cro-agent.js /absolute/path/to/experiments`. The daemon listens on `ws://127.0.0.1:5678`, and the extension has to be loaded and connected before any tool works.
 
+## VS Code Extension
+
+`experiments/scripts/vscode-extension/` adds three things to VS Code:
+- a status bar item showing whether the bridge is up, whether Chrome is connected and which tab is targeted (click it to pause or resume injection);
+- a **Kameleoon Experiments** panel in the Explorer listing the current experiment, the archives (open, compare with current, restore) and the imported tickets;
+- **Start From HubSpot Ticket**, which imports a ticket, archives the current work, opens the brief and starts Claude on it.
+
+To install it, link the folder into VS Code's extensions and reload the window:
+```bash
+ln -s "$PWD/experiments/scripts/vscode-extension" ~/.vscode/extensions/local.kameleoon-experiment-archive-1.0.0
+```
+
 ## Automatic Startup (VS Code)
 
 This project includes a `.vscode/tasks.json` that can run the daemon automatically:
