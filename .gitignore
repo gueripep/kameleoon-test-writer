@@ -36,3 +36,11 @@ lerna-debug.log*
 dist/
 build/
 .cache/
+
+# Client material: never published (the repo is public)
+experiments/.archive/
+experiments/.tickets/
+memory/
+SPEC-hubspot-ticket-import.md
+local-cro-workflow/SPEC-*.md
+__pycache__/
