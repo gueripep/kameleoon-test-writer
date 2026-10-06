@@ -4,7 +4,7 @@ Rules for writing client A/B test variations in this folder. The bridge is assum
 
 ## Files
 
-- **`variation.js`**: Line 1 is always `// Site: <hostname>`, the host of the target tab (`evaluate_js` → `location.hostname`), e.g. `// Site: www.example.com`. The archive script derives the client name from it, so keep the exact format.
+- **`variation.js`**: Line 1 is always `// Site: <hostname>`, the host of the target tab (`evaluate_js` → `location.hostname`), e.g. `// Site: www.example.com`. The archive namer and the VS Code panel read it, and `npm run lint` fails without it.
 - **`variation.css`**: All styling. Injected automatically.
 - **`kameleoon.d.ts`**: The full Kameleoon API surface. Check it before using an API method.
 - Ignore segments, triggers and goals. The task is the site modification only.
@@ -84,7 +84,8 @@ The deliverable is the smallest change that fixes the reported symptom.
 ## Archiving
 
 Past experiments live in `.archive/<date>-<name>/` (dot-prefixed so the watcher ignores them). Run these with the shell; there are no MCP tools for them:
-- `./scripts/archive.sh [name]` archives and empties both variation files. Without a name, it generates one from the code.
+- `./scripts/archive.sh [name]` archives and empties both variation files. Without a name, it generates one from the code. It skips the copy (but still empties the files) when they are empty or identical to an existing archive.
 - `./scripts/restore.sh [.archive/<folder>]` restores a folder (the most recent one by default). It archives current work first unless both files are empty, so a restore can always be undone.
+- Versions of one test share a `.test-id`. Restore carries the archive's id into the workspace, Start From Ticket sets it to the ticket id, and archiving copies it. The VS Code panel groups archives by it, so never edit or delete `.test-id` files by hand.
 
 Archive before starting unrelated work on top of a finished experiment, or when the user asks to park or checkpoint the test. Both scripts trigger a page reload.

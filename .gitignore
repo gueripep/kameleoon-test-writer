@@ -44,6 +44,7 @@ memory/
 experiments/variation.js
 experiments/variation.css
 experiments/config.json
+experiments/.test-id
 # Machine-specific paths; copy .mcp.json.example
 experiments/.mcp.json
 __pycache__/

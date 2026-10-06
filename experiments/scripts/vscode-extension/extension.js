@@ -92,6 +92,22 @@ const createStatusBar = context => {
     context.subscriptions.push(item, { dispose: () => clearInterval(timer) });
 };
 
+const archiveItem = folder => {
+    const name = path.basename(folder);
+    const [, date, time, slug] = name.match(/^(\d{4}-\d{2}-\d{2})_(\d{4})-(.*)$/) || [];
+    const item = new vscode.TreeItem(slug || name, vscode.TreeItemCollapsibleState.Collapsed);
+    item.description = date ? `${date} ${time.slice(0, 2)}:${time.slice(2)}` : '';
+    item.resourceUri = vscode.Uri.file(folder);
+    item.iconPath = new vscode.ThemeIcon('archive');
+    item.contextValue = 'archive';
+    item.tooltip = siteOf(folder) ? `${name}\nSite: ${siteOf(folder)}` : name;
+    item.kind = 'folder';
+    item.folder = folder;
+    item.archived = true;
+    item.testId = readText(path.join(folder, '.test-id')).trim();
+    return item;
+};
+
 class ExperimentsTree {
     constructor() {
         this.emitter = new vscode.EventEmitter();
@@ -119,21 +135,26 @@ class ExperimentsTree {
             return [current, group('Archive', 'archives', listDirs(path.join(dir, '.archive')).length), group('Tickets', 'tickets', listDirs(path.join(dir, '.tickets')).length)];
         }
         if (parent.kind === 'archives') {
-            return listDirs(path.join(dir, '.archive')).sort().reverse().map(name => {
-                const folder = path.join(dir, '.archive', name);
-                const [, date, time, slug] = name.match(/^(\d{4}-\d{2}-\d{2})_(\d{4})-(.*)$/) || [];
-                const item = new vscode.TreeItem(slug || name, vscode.TreeItemCollapsibleState.Collapsed);
-                item.description = date ? `${date} ${time.slice(0, 2)}:${time.slice(2)}` : '';
-                item.resourceUri = vscode.Uri.file(folder);
-                item.iconPath = new vscode.ThemeIcon('archive');
-                item.contextValue = 'archive';
-                item.tooltip = siteOf(folder) ? `${name}\nSite: ${siteOf(folder)}` : name;
-                item.kind = 'folder';
-                item.folder = folder;
-                item.archived = true;
-                return item;
+            // Archives sharing a .test-id are versions of one test; a lone version is shown flat.
+            const groups = new Map();
+            for (const name of listDirs(path.join(dir, '.archive')).sort().reverse()) {
+                const item = archiveItem(path.join(dir, '.archive', name));
+                const key = item.testId || item.folder;
+                groups.set(key, [...(groups.get(key) || []), item]);
+            }
+            return [...groups.values()].map(versions => {
+                if (versions.length === 1) return versions[0];
+                const [latest] = versions;
+                const group = new vscode.TreeItem(latest.label, vscode.TreeItemCollapsibleState.Collapsed);
+                group.description = `${versions.length} versions · ${latest.description}`;
+                group.tooltip = /^\d+$/.test(latest.testId) ? `HubSpot ticket ${latest.testId}` : undefined;
+                group.iconPath = new vscode.ThemeIcon('versions');
+                group.kind = 'versions';
+                group.versions = versions;
+                return group;
             });
         }
+        if (parent.kind === 'versions') return parent.versions;
         if (parent.kind === 'tickets') {
             const root = path.join(dir, '.tickets');
             const mtime = name => { try { return fs.statSync(path.join(root, name)).mtimeMs; } catch { return 0; } };
@@ -186,6 +207,10 @@ const startFromFolder = async (dir, ticketFolder) => {
             return vscode.window.showErrorMessage(`Archive failed, nothing was reset: ${e.message}`);
         }
     }
+
+    // Every version archived from here on is grouped under this ticket.
+    const ticketId = (path.basename(ticketFolder).match(/^\d+/) || [])[0];
+    if (ticketId) fs.writeFileSync(path.join(dir, '.test-id'), `${ticketId}\n`);
 
     const objective = path.join(dir, ticketFolder, 'Objective.md');
     if (fs.existsSync(objective)) await vscode.window.showTextDocument(vscode.Uri.file(objective), { preview: false });

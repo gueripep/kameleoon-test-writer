@@ -6,6 +6,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+reset() {
+    : > variation.js
+    : > variation.css
+    # The next thing written here is a new test, so it gets a new id.
+    rm -f .test-id
+    echo "variation.js and variation.css reset."
+}
+
+# Archiving always resets; it only skips the copy when there is nothing new to keep.
+if [ ! -s variation.js ] && [ ! -s variation.css ]; then
+    echo "Nothing to archive (both files are empty)."
+    reset
+    exit 0
+fi
+for dir in .archive/*/; do
+    [ -d "$dir" ] || continue
+    if cmp -s variation.js "$dir/variation.js" 2>/dev/null && cmp -s variation.css "$dir/variation.css" 2>/dev/null; then
+        echo "Already archived as ${dir%/}, not copying it again."
+        reset
+        exit 0
+    fi
+done
+
 # GEMINI_API_KEY lives in .env (gitignored); an already-exported one wins.
 if [ -f .env ] && [ -z "${GEMINI_API_KEY:-}" ]; then
     set -a
@@ -35,10 +58,9 @@ mkdir -p "$DEST"
 for f in variation.js variation.css; do
     [ -f "$f" ] && cp "$f" "$DEST/$f"
 done
-
-: > variation.js
-
-: > variation.css
+# Archives sharing a .test-id are versions of one test (set by restore.sh or Start From Ticket).
+[ -s .test-id ] || echo "$(date +%Y%m%d%H%M%S)-$RANDOM" > .test-id
+cp .test-id "$DEST/.test-id"
 
 echo "Archived to $DEST"
-echo "variation.js and variation.css reset."
+reset
