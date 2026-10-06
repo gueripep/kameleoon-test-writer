@@ -36,7 +36,7 @@
         { "command": "kameleoonArchive.refresh", "when": "view == kameleoonExperiments", "group": "navigation@3" }
       ],
       "view/item/context": [
-        { "command": "kameleoonArchive.compare", "when": "view == kameleoonExperiments && viewItem == archive", "group": "inline@1" },
+        { "command": "kameleoonArchive.compare", "when": "view == kameleoonExperiments && viewItem =~ /^archive(File)?$/", "group": "inline@1" },
         { "command": "kameleoonArchive.restore", "when": "view == kameleoonExperiments && viewItem == archive", "group": "inline@2" },
         { "command": "kameleoonArchive.startFromImportedTicket", "when": "view == kameleoonExperiments && viewItem == ticket", "group": "inline" }
       ],

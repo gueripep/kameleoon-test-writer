@@ -107,9 +107,10 @@ class ExperimentsTree {
         if (!dir) return [];
         if (!parent) {
             const site = siteOf(dir);
-            const current = new vscode.TreeItem(`Current: ${site || (hasWork(dir) ? 'unnamed' : 'empty')}`);
+            const current = new vscode.TreeItem(`Current: ${site || (hasWork(dir) ? 'unnamed' : 'empty')}`, vscode.TreeItemCollapsibleState.Expanded);
             current.iconPath = new vscode.ThemeIcon('beaker');
-            current.command = { command: 'vscode.open', title: 'Open', arguments: [vscode.Uri.file(path.join(dir, 'variation.js'))] };
+            current.kind = 'folder';
+            current.folder = dir;
             const group = (label, kind, count) => {
                 const g = new vscode.TreeItem(`${label} (${count})`, kind === 'archives' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
                 g.kind = kind;
@@ -121,14 +122,15 @@ class ExperimentsTree {
             return listDirs(path.join(dir, '.archive')).sort().reverse().map(name => {
                 const folder = path.join(dir, '.archive', name);
                 const [, date, time, slug] = name.match(/^(\d{4}-\d{2}-\d{2})_(\d{4})-(.*)$/) || [];
-                const item = new vscode.TreeItem(slug || name);
+                const item = new vscode.TreeItem(slug || name, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = date ? `${date} ${time.slice(0, 2)}:${time.slice(2)}` : '';
                 item.resourceUri = vscode.Uri.file(folder);
                 item.iconPath = new vscode.ThemeIcon('archive');
                 item.contextValue = 'archive';
                 item.tooltip = siteOf(folder) ? `${name}\nSite: ${siteOf(folder)}` : name;
-                const file = ['variation.js', 'variation.css'].map(f => path.join(folder, f)).find(f => fs.existsSync(f));
-                if (file) item.command = { command: 'vscode.open', title: 'Open', arguments: [vscode.Uri.file(file)] };
+                item.kind = 'folder';
+                item.folder = folder;
+                item.archived = true;
                 return item;
             });
         }
@@ -144,6 +146,20 @@ class ExperimentsTree {
                 item.contextValue = 'ticket';
                 item.ticketFolder = path.join('.tickets', name);
                 item.command = { command: 'vscode.open', title: 'Open', arguments: [vscode.Uri.file(path.join(root, name, 'Objective.md'))] };
+                return item;
+            });
+        }
+        if (parent.kind === 'folder') {
+            const rank = f => ({ 'variation.js': 0, 'variation.css': 1 }[f] ?? 2);
+            let files = [];
+            try { files = fs.readdirSync(parent.folder, { withFileTypes: true }).filter(d => d.isFile() && !d.name.startsWith('.')).map(d => d.name); } catch { /* folder gone */ }
+            // The current folder holds the whole workspace; only its variation files belong here.
+            if (!parent.archived) files = files.filter(f => rank(f) < 2);
+            return files.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).map(f => {
+                const item = new vscode.TreeItem(f);
+                item.resourceUri = vscode.Uri.file(path.join(parent.folder, f));
+                item.contextValue = parent.archived && rank(f) < 2 ? 'archiveFile' : 'file';
+                item.command = { command: 'vscode.open', title: 'Open', arguments: [item.resourceUri] };
                 return item;
             });
         }
@@ -241,9 +257,12 @@ const activate = context => {
             run(dir, 'archive.sh');
         }),
         vscode.commands.registerCommand('kameleoonArchive.compare', arg => {
-            const folder = target(arg).fsPath;
-            const dir = rootFor(target(arg));
-            const file = ['variation.js', 'variation.css'].find(f => fs.existsSync(path.join(folder, f)));
+            // Accepts an archive folder (compares its JS, else CSS) or one of its variation files.
+            const picked = target(arg).fsPath;
+            const isFile = fs.statSync(picked).isFile();
+            const folder = isFile ? path.dirname(picked) : picked;
+            const dir = path.dirname(path.dirname(folder));
+            const file = isFile ? path.basename(picked) : ['variation.js', 'variation.css'].find(f => fs.existsSync(path.join(folder, f)));
             if (!file) return vscode.window.showErrorMessage('This archive has no variation files.');
             vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(path.join(folder, file)), vscode.Uri.file(path.join(dir, file)),
                 `${path.basename(folder)} ↔ current ${file}`);
