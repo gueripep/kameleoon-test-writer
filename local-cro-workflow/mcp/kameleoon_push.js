@@ -173,6 +173,13 @@ const ListExperimentsSchema = z.object({
   page: z.number().optional().describe("1-based page number (default 1).")
 });
 
+const GetCodeSchema = z.object({
+  personalizationId: z.number().optional().describe("Read every content (variation) of this personalization."),
+  experimentId: z.number().optional().describe("Read every variation of this experiment, plus its experiment-level script if any."),
+  variationId: z.number().optional().describe("Read a single variation / personalization content."),
+  maxCodeChars: z.number().optional().describe("Truncate each code field to this many characters (default 20000). Full lengths are always reported.")
+});
+
 const CreateVariationSchema = z.object({
   experimentId: z.number().describe("Id of the experiment to attach the new variation to."),
   name: z.string().describe("Name for the new variation as it will appear in the Kameleoon app."),
@@ -217,6 +224,11 @@ export const kameleoonTools = [
     name: "list_kameleoon_experiments",
     description: "Lists Kameleoon experiments via the Automation API, authenticated by the user's existing app.kameleoon.com browser session. Read-only. Use this to work out which experiment the local variation belongs to: rank candidates by (1) siteCode/baseURL host vs the CRO target tab's URL — by far the strongest signal, and the response includes targetTabUrl for exactly this — then (2) name similarity to the branch / .archive folder / what the user called the test, then (3) dateModified and status (active or draft beats stopped). Archived experiments are excluded by default and are never valid targets. Present the top candidate plus a couple of alternatives with name, id, status and baseURL, say why the top one won, and ask rather than guessing confidently when nothing scores well.",
     inputSchema: zodToJsonSchema(ListExperimentsSchema)
+  },
+  {
+    name: "get_kameleoon_code",
+    description: "Read-only. Returns the code a personalization or experiment actually runs, whatever editor produced it: graphic editor and Widget Studio contents compile to generatedJsCode/generatedCssCode, code editor and prompt contents live in jsCode/cssCode, redirects in redirection. Pass exactly one of personalizationId, experimentId or variationId. widgetTemplateInput holds the editor's positioning settings, which can disagree with the generated code — when they do, the generated code is what runs.",
+    inputSchema: zodToJsonSchema(GetCodeSchema)
   },
   {
     name: "create_kameleoon_variation",
@@ -295,6 +307,93 @@ async function listExperiments(args) {
     hostMatches: slimmed.filter(e => e.matchesTargetTabHost).length,
     note: 'Ranking here is host-match then recency only. Weigh name similarity and status yourself, show the user your reasoning, and get confirmation before creating anything.',
     experiments: slimmed
+  };
+}
+
+// Every content type shares one variation schema; only which of these fields is filled differs.
+const CODE_FIELDS = ['jsCode', 'cssCode', 'generatedJsCode', 'generatedCssCode'];
+const CAMPAIGN_CODE_FIELDS = ['globalScript', 'commonJavaScriptCode', 'commonCssCode'];
+
+function isBlank(value) {
+  return value == null || (typeof value === 'string' && value.trim() === '');
+}
+
+function truncateCode(value, maxChars) {
+  if (value.length <= maxChars) return { code: value, length: value.length };
+  return { code: value.slice(0, maxChars), length: value.length, truncated: true };
+}
+
+function describeSource(variation) {
+  const hasHandCode = !isBlank(variation.jsCode) || !isBlank(variation.cssCode);
+  const hasGenerated = !isBlank(variation.generatedJsCode) || !isBlank(variation.generatedCssCode);
+  if (!isBlank(variation.redirection)) return 'redirect';
+  if (variation.creationMode === 'WIDGET') return 'widget';
+  if (variation.aiBuilder && hasHandCode) return 'prompt';
+  if (hasHandCode && hasGenerated) return 'graphic editor + code editor';
+  if (hasHandCode) return 'code editor';
+  if (hasGenerated) return 'graphic editor';
+  return 'empty';
+}
+
+function slimVariationCode(variation, maxChars) {
+  const code = {};
+  for (const field of CODE_FIELDS) {
+    if (!isBlank(variation[field])) code[field] = truncateCode(variation[field], maxChars);
+  }
+  const out = {
+    id: variation.id,
+    name: variation.name,
+    source: describeSource(variation),
+    creationMode: variation.creationMode,
+    aiBuilder: variation.aiBuilder || false,
+    shadowDom: variation.shadowDom,
+    isJsCodeAfterDomReady: variation.isJsCodeAfterDomReady,
+    code
+  };
+  if (!isBlank(variation.redirection)) {
+    out.redirection = variation.redirection;
+    out.redirectionStrings = variation.redirectionStrings;
+  }
+  if (variation.widgetTemplateInput) out.widgetTemplateInput = variation.widgetTemplateInput;
+  return out;
+}
+
+async function getCode(args) {
+  const given = ['personalizationId', 'experimentId', 'variationId'].filter(k => args[k] != null);
+  if (given.length !== 1) throw new Error('Pass exactly one of personalizationId, experimentId or variationId.');
+  const maxChars = args.maxCodeChars || 20000;
+
+  if (args.variationId != null) {
+    const { data } = await apiRequest('GET', `/variations/${args.variationId}`);
+    return { variations: [slimVariationCode(data, maxChars)] };
+  }
+
+  const isPersonalization = args.personalizationId != null;
+  const id = isPersonalization ? args.personalizationId : args.experimentId;
+  const { data: campaign } = await apiRequest('GET', `/${isPersonalization ? 'personalizations' : 'experiments'}/${id}`);
+  const variationIds = (isPersonalization ? campaign.variationIds : campaign.variations) || [];
+
+  const variations = [];
+  for (const variationId of variationIds) {
+    const { data } = await apiRequest('GET', `/variations/${variationId}`);
+    variations.push(slimVariationCode(data, maxChars));
+  }
+
+  const campaignCode = {};
+  for (const field of CAMPAIGN_CODE_FIELDS) {
+    if (!isBlank(campaign[field])) campaignCode[field] = truncateCode(campaign[field], maxChars);
+  }
+
+  return {
+    kind: isPersonalization ? 'personalization' : 'experiment',
+    id: campaign.id,
+    name: campaign.name,
+    type: campaign.type,
+    status: campaign.status,
+    siteId: campaign.siteId,
+    baseURL: campaign.baseURL,
+    campaignCode,
+    variations
   };
 }
 
@@ -631,6 +730,7 @@ async function pushExperimentScript(args) {
 export async function handleKameleoonTool(name, rawArgs) {
   const run = async () => {
     if (name === 'list_kameleoon_experiments') return listExperiments(ListExperimentsSchema.parse(rawArgs || {}));
+    if (name === 'get_kameleoon_code') return getCode(GetCodeSchema.parse(rawArgs || {}));
     if (name === 'create_kameleoon_variation') return createVariation(CreateVariationSchema.parse(rawArgs || {}));
     if (name === 'push_variation_code') return pushVariationCode(PushVariationCodeSchema.parse(rawArgs || {}));
     if (name === 'create_kameleoon_goal') return createGoal(CreateGoalSchema.parse(rawArgs || {}));

@@ -79,6 +79,7 @@ The deliverable is the smallest change that fixes the reported symptom.
 - `Kameleoon.API.Data.setCustomData()` silently does nothing for keys not declared in the project's Custom Data settings. Round-trip a known key before blaming the code.
 - `Kameleoon.API.Products.obtainProductInteractions()` returns all zeros for an EAN it doesn't recognize. Check the exact EAN format in the site's real tracking calls before concluding there's no data.
 - Don't assume a dataLayer/GTM event exists because it sounds right. Grep the live container (`https://www.googletagmanager.com/gtm.js?id=<GTM-ID>`) for the literal event name.
+- To see what a personalization or experiment in the app actually runs (graphic editor, widget, code editor, prompt or redirect), use `get_kameleoon_code`. The editor's settings (`widgetTemplateInput`) can disagree with the generated code, and the generated code is what runs.
 - For API and product questions, search the Kameleoon docs MCP (Mintlify, docs.kameleoon.com) before relying on memory.
 
 ## Archiving
