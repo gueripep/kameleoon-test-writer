@@ -30,6 +30,7 @@ These live in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatic
 |---|---|
 | `kameleoon-publish` | Push or publish to the Kameleoon app; create variations, goals or experiments |
 | `kameleoon-qa` | Verify a variation in a real simulation, before calling it working |
+| `kameleoon-graphic-editor` | Read, fix or edit a variation inside the graphic editor tab |
 | `debug-layout-and-focus` | Layout jumps or collapses after load, scroll jumps, Tab/focus problems |
 | `diagnose-kameleoon-app` | A page in app.kameleoon.com won't load or shows wrong data |
 | `find-session` | Find a past Claude Code conversation |
