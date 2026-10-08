@@ -37,6 +37,21 @@ These live in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatic
 | `diagnose-kameleoon-app` | A page in app.kameleoon.com won't load or shows wrong data |
 | `find-session` | Find a past Claude Code conversation |
 
+## Memory
+
+Your persistent memory (in Claude Code, the auto-memory folder; its `MEMORY.md` index is loaded each session) holds findings, not rules. Manage it without being asked.
+
+**Reuse.** Before working on a client, site, experiment or tool, scan the index for its name, sitecode or topic and read the matching notes. Verify a note against the live page or code before relying on it, and fix or delete it if it's wrong.
+
+**When to consider saving:** at the end of an investigation or bug fix, after the user corrects you, or when something surprised you because you measured it.
+
+**Save only if all three hold:**
+1. It isn't already in the Kameleoon docs (search the Mintlify MCP), in an `AGENTS.md`, in a skill, or in the code or git history.
+2. Rediscovering it would cost real time: a measured client quirk, an app internal, a diagnostic pattern, a dead end.
+3. It will still be true next month, or carries a date when it may not be.
+
+**How:** update an existing note before creating one. Keep the measured facts with their date, link to the docs instead of restating them, and keep client names and sitecodes in memory, never in the repo. A general *rule* the user gives you belongs in this file or a skill (propose the edit), not in memory. When saving, tell the user in one line what you saved; when you skip something because it's already covered, say nothing.
+
 ## Committing and pushing
 
 When a change to the bridge itself (`local-cro-workflow/`, `scripts/`, `.claude/skills/`, these instruction files, lint config) is done and verified, commit it and push to `origin main` without asking. Verified means it ran: the tool was exercised live, or the daemon restarted cleanly and the changed path was hit. Make one commit per logical change, with a message that says what changed and why.
