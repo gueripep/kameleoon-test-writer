@@ -19,7 +19,7 @@ The **target tab** is set in the extension popup with "Target This Tab". It's pi
 ## The Kameleoon app: hard rules
 
 - Kameleoon API calls run inside the user's logged-in `app.kameleoon.com` tab. **Never automate login or client impersonation**, and never try to read the session. If no app tab is open, ask the user to open one.
-- **Reading is free.** Use the read-only tools (`list_kameleoon_experiments`, `get_kameleoon_code`, `get_kameleoon_results`) or `GET` calls to `api.kameleoon.com` from the app tab whenever they help, without asking.
+- **Reading is free.** Use the read-only tools (`list_kameleoon_experiments`, `get_kameleoon_code`, `get_kameleoon_results`) without asking. If a read you need has no tool, a `GET` through `evaluate_js` in the app tab works once, but add a tool if you'll need it again: tools go through the proxy's guardrails, raw calls don't.
 - **Any change in the app needs the user's explicit yes first**, every time: creating or editing experiments, variations, goals or scripts, pushing code, changing traffic or status. Say exactly what you will change, then wait. A yes covers that one change, not later ones. The results `POST` in `get_kameleoon_results` is the exception: it only computes a report.
 - That yes is also what allows `confirmed: true` or `overwrite: true`. Never pass either on your own.
 - Nothing is ever deleted.
@@ -33,26 +33,19 @@ These live in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatic
 | `kameleoon-publish` | Push or publish to the Kameleoon app; create variations, goals or experiments |
 | `kameleoon-qa` | Verify a variation in a real simulation, before calling it working |
 | `kameleoon-graphic-editor` | Read, fix or edit a variation inside the graphic editor tab |
-| `variation-patterns` | Tested code for changes a site keeps undoing, once the hydration ladder didn't hold |
+| `variation-patterns` | Code for changes a site keeps undoing, once pattern A failed |
 | `debug-layout-and-focus` | Layout jumps or collapses after load, scroll jumps, Tab/focus problems |
 | `diagnose-kameleoon-app` | A page in app.kameleoon.com won't load or shows wrong data |
 | `find-session` | Find a past Claude Code conversation |
 
 ## Memory
 
-Your persistent memory (in Claude Code, the auto-memory folder, indexed by `MEMORY.md`) holds findings, not rules. Manage it without being asked, and treat every line as a cost: it competes for attention in every later session.
+Claude Code's own memory rules apply. On top of them, for this repo:
 
-**Reuse.** Before working on a client, site or tool, read the matching notes, and grep `experiments/.archive/*/variation.js` for its `// Site: <host>` line. Check a note against the live page or code before relying on it; fix or delete it if it's wrong.
-
-**Save** at the end of an investigation, after a correction, or after a measured surprise, and only if all of these hold:
-1. The Kameleoon docs (Mintlify MCP), an `AGENTS.md`, a skill and the code don't already cover it.
-2. Rediscovering it would cost real time.
-3. It would change what a future session does, not just describe what happened.
-4. It stays true, or it's dated.
-
-**File it in the right place.** Strip the site's name, selectors and data. What still explains the fix is a mechanism: put it in the `variation-patterns` skill once it's understood or has been seen on a second site, and until then mark it "likely general" in the note. What's left is site-specific and goes in the client's note. Code is copied from code that ran, never rewritten: in the skill without client details, and in a note as a short snippet with its `.archive/<folder>` as source. A rule from the user goes in this file or a skill, proposed as an edit.
-
-**Keep it small.** Update or shorten an existing note before adding one, prefer one sentence to a paragraph, and delete what's stale or duplicated whenever you touch a note. Say in one line what you saved; say nothing when you skip.
+- **Before client work,** read the matching notes and grep `experiments/.archive/*/variation.js` for the site's `// Site: <host>` line.
+- **Before saving,** search the Kameleoon docs (Mintlify MCP), both `AGENTS.md` files and the skills. Save only what none of them cover and what would change what a future session does.
+- **Split general from site-specific.** A mechanism that would work on other sites goes in the `variation-patterns` skill, without client details, once it's understood or seen twice. Site facts stay in the client's note. Code in either place is copied from code that ran, with its `.archive/<folder>` as source.
+- **Client names, sitecodes and URLs stay in memory,** never in the repo.
 
 ## Committing and pushing
 
