@@ -19,7 +19,9 @@ The **target tab** is set in the extension popup with "Target This Tab". It's pi
 ## The Kameleoon app: hard rules
 
 - Kameleoon API calls run inside the user's logged-in `app.kameleoon.com` tab. **Never automate login or client impersonation**, and never try to read the session. If no app tab is open, ask the user to open one.
-- Anything that changes live traffic or overwrites code requires the user's explicit yes before you pass `confirmed: true` or `overwrite: true`.
+- **Reading is free.** Use the read-only tools (`list_kameleoon_experiments`, `get_kameleoon_code`, `get_kameleoon_results`) or `GET` calls to `api.kameleoon.com` from the app tab whenever they help, without asking.
+- **Any change in the app needs the user's explicit yes first**, every time: creating or editing experiments, variations, goals or scripts, pushing code, changing traffic or status. Say exactly what you will change, then wait. A yes covers that one change, not later ones. The results `POST` in `get_kameleoon_results` is the exception: it only computes a report.
+- That yes is also what allows `confirmed: true` or `overwrite: true`. Never pass either on your own.
 - Nothing is ever deleted.
 
 ## Procedures
