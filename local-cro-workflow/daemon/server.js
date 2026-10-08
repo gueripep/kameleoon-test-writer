@@ -391,8 +391,8 @@ export function clearMutationLog(timeoutMs = 5000, tabId = null) {
   return sendExtensionRequest('clear_mutation_log', { targetTabId: tabId }, timeoutMs, false);
 }
 
-export function openUrl(url, timeoutMs = 10000) {
-  return sendExtensionRequest('open_url', { url }, timeoutMs);
+export function openUrl(url, setTarget = true, timeoutMs = 10000) {
+  return sendExtensionRequest('open_url', { url, setTarget }, timeoutMs);
 }
 
 export function setViewport(width, height, mobile = false, tabId = null, timeoutMs = 5000) {

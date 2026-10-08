@@ -941,11 +941,12 @@ async function handleOpenUrl(payload) {
   if (!isEnabled) return;
   try {
     const tab = await chrome.tabs.create({ url: payload.url });
+    if (payload.setTarget) await setTargetTab(tab.id);
     if (socket.readyState === WebSocket.OPEN && payload.messageId) {
       socket.send(JSON.stringify({
         type: 'open_url_result',
         messageId: payload.messageId,
-        result: { success: true, tabId: tab.id, url: tab.url }
+        result: { success: true, tabId: tab.id, url: tab.url, targeted: !!payload.setTarget }
       }));
     }
   } catch (e) {

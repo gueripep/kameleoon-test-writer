@@ -62,6 +62,7 @@ const ReloadPageSchema = z.object({
 });
 const OpenUrlSchema = z.object({
   url: z.string().describe("The URL to open in a new tab"),
+  setTarget: z.boolean().optional().describe("Pin the new tab as the bridge's target (default true). Pass false to open a side tab without retargeting"),
   timeoutMs: z.number().optional().describe("Timeout for opening the URL in ms"),
 });
 
@@ -595,7 +596,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "open_url",
-        description: "Opens a new URL in a new Chrome tab.",
+        description: "Opens a URL in a new Chrome tab and, by default, pins it as the bridge's target tab (in the 'CRO Target' group) so the user sees which tab the agent is working on. Pass setTarget:false to leave the target unchanged.",
         inputSchema: zodToJsonSchema(OpenUrlSchema),
       },
       {
@@ -1033,7 +1034,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "open_url") {
     const args = OpenUrlSchema.parse(request.params.arguments);
     try {
-      const result = await openUrl(args.url, args.timeoutMs || 10000);
+      const result = await openUrl(args.url, args.setTarget !== false, args.timeoutMs || 10000);
       return {
         content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }],
       };

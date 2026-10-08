@@ -393,7 +393,8 @@ async function pushAndSimulate(args) {
   }
 
   const simulationUrl = buildSimulationUrl(baseURL, args.experimentId);
-  const opened = await openUrl(simulationUrl, 15000);
+  // Not the target: the bridge would inject the local files and taint the real-engine check.
+  const opened = await openUrl(simulationUrl, false, 15000);
   const tabId = opened && opened.tabId;
   if (!tabId) throw new Error(`Opening ${simulationUrl} returned no tab id: ${JSON.stringify(opened)}`);
 
