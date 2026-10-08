@@ -10,6 +10,7 @@
 // Three narrow tools, deliberately split so that re-pushing edited code never creates
 // another variation:
 //   list_kameleoon_experiments  — read-only, feeds the agent's experiment guess
+//   get_kameleoon_results       — read-only, results report with breakdowns (POST computes, GET polls)
 //   create_kameleoon_variation  — POST /variations + attach PATCH (rewrites traffic split)
 //   push_variation_code         — PATCH /variations/{id} with the workspace files
 //   create_kameleoon_goal       — POST /goals (CUSTOM) + optional append to experiments' goals
@@ -180,6 +181,23 @@ const GetCodeSchema = z.object({
   maxCodeChars: z.number().optional().describe("Truncate each code field to this many characters (default 20000). Full lengths are always reported.")
 });
 
+const GetResultsSchema = z.object({
+  experimentId: z.number().describe("Experiment (or feature experiment) to read results for."),
+  goalIds: z.array(z.number()).optional().describe("Goals to include. Omit for every goal attached to the experiment."),
+  breakdown: z.object({
+    type: z.string().describe("INTERVAL, DEVICE_TYPE, BROWSER, COUNTRY, NEW_VISITOR, CUSTOM_DATUM, CROSS_CAMPAIGN, … (full list in the Automation API docs)."),
+    interval: z.enum(['HOUR', 'DAY', 'WEEK', 'MONTH', 'YEAR']).optional().describe("Required with type INTERVAL."),
+    index: z.number().optional().describe("Custom data index, required with type CUSTOM_DATUM."),
+    experiments: z.array(z.number()).optional().describe("For CROSS_CAMPAIGN."),
+    personalizations: z.array(z.number()).optional().describe("For CROSS_CAMPAIGN.")
+  }).optional().describe("Split each variation's data by one dimension. Omit for totals only."),
+  start: z.string().optional().describe("ISO date-time without timezone, e.g. 2026-10-07T00:00:00. Omit both start and end for the whole experiment."),
+  end: z.string().optional().describe("ISO date-time without timezone, e.g. 2026-10-07T23:59:59."),
+  visitorData: z.boolean().optional().describe("true counts unique visitors instead of visits (default false, like the results page)."),
+  filters: z.array(z.record(z.any())).optional().describe("Raw Automation API filters, passed through unchanged, e.g. [{\"type\":\"DEVICE_TYPE\",\"values\":[\"PHONE\"],\"include\":true}]."),
+  maxRowsPerVariation: z.number().optional().describe("Cap on breakdown rows returned per variation (default 200). Rows are sorted by key; the response says when it truncated.")
+});
+
 const CreateVariationSchema = z.object({
   experimentId: z.number().describe("Id of the experiment to attach the new variation to."),
   name: z.string().describe("Name for the new variation as it will appear in the Kameleoon app."),
@@ -229,6 +247,11 @@ export const kameleoonTools = [
     name: "get_kameleoon_code",
     description: "Read-only. Returns the code a personalization or experiment actually runs, whatever editor produced it: graphic editor and Widget Studio contents compile to generatedJsCode/generatedCssCode, code editor and prompt contents live in jsCode/cssCode, redirects in redirection. Pass exactly one of personalizationId, experimentId or variationId. widgetTemplateInput holds the editor's positioning settings, which can disagree with the generated code — when they do, the generated code is what runs.",
     inputSchema: zodToJsonSchema(GetCodeSchema)
+  },
+  {
+    name: "get_kameleoon_results",
+    description: "Read-only. Fetches an experiment's results through the Automation API (POST /experiments/{id}/results, then polls GET /results?dataCode=) and returns a compact table per variation: visits, visitors, and per goal conversions, revenue, average cart, conversion rate, improvement rate and reliability. Use it to investigate a results page: an INTERVAL breakdown by DAY then HOUR finds revenue spikes and outliers, DEVICE_TYPE/BROWSER/COUNTRY breakdowns find segment effects. Numbers follow the API's timezone, which may differ from the app's display.",
+    inputSchema: zodToJsonSchema(GetResultsSchema)
   },
   {
     name: "create_kameleoon_variation",
@@ -393,6 +416,91 @@ async function getCode(args) {
     siteId: campaign.siteId,
     baseURL: campaign.baseURL,
     campaignCode,
+    variations
+  };
+}
+
+const RESULT_GOAL_FIELDS = ['conversionCount', 'convertedVisitCount', 'revenueCount', 'averageCart', 'conversionRate', 'improvementRate', 'reliability'];
+
+function slimResultRow(generalData, goalNames) {
+  const goals = {};
+  for (const [goalId, g] of Object.entries(generalData.goalsData || {})) {
+    const row = { name: goalNames[goalId] };
+    for (const field of RESULT_GOAL_FIELDS) {
+      if (g[field] != null) row[field] = g[field];
+    }
+    goals[goalId] = row;
+  }
+  return { visits: generalData.visitCount, visitors: generalData.visitorCount, goals };
+}
+
+async function getResults(args) {
+  const { data: experiment } = await apiRequest('GET', `/experiments/${args.experimentId}?optionalFields=goals`);
+  const goalIds = args.goalIds || experiment.goals || null;
+
+  const goalNames = {};
+  for (const goalId of goalIds || []) {
+    try {
+      goalNames[goalId] = (await apiRequest('GET', `/goals/${goalId}`)).data.name;
+    } catch {
+      goalNames[goalId] = null;
+    }
+  }
+
+  const variationNames = {};
+  for (const variationId of experiment.variations || []) {
+    try {
+      variationNames[variationId] = (await apiRequest('GET', `/variations/${variationId}`)).data.name;
+    } catch {
+      variationNames[variationId] = null;
+    }
+  }
+
+  const body = {
+    goalsIds: goalIds,
+    referenceVariationId: '0',
+    visitorData: args.visitorData ?? false,
+    conversionType: 'ALL_CONVERSION',
+    ...(args.breakdown ? { breakdown: args.breakdown } : {}),
+    ...(args.filters ? { filters: args.filters } : {}),
+    ...(args.start || args.end ? { dateIntervals: [{ start: args.start, end: args.end }] } : {})
+  };
+  // POST only asks Kameleoon to compute a report; nothing on the experiment changes.
+  const { data: requested } = await apiRequest('POST', `/experiments/${args.experimentId}/results`, body, 30000);
+  const dataCode = requested && requested.dataCode;
+  if (!dataCode) throw new Error(`POST /experiments/${args.experimentId}/results returned no dataCode: ${JSON.stringify(requested)}`);
+
+  let report;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    report = (await apiRequest('GET', `/results?dataCode=${dataCode}`, null, 30000)).data;
+    if (report && report.status === 'READY') break;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  if (!report || report.status !== 'READY') throw new Error(`Results for experiment ${args.experimentId} were still ${report ? report.status : 'missing'} after 60s. Retry, or narrow the request.`);
+
+  const maxRows = args.maxRowsPerVariation || 200;
+  const variations = {};
+  let truncated = false;
+  for (const [variationId, variationData] of Object.entries(report.data.variationData || {})) {
+    const rows = Object.entries(variationData.breakdownData || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (rows.length > maxRows) truncated = true;
+    const breakdown = {};
+    for (const [key, value] of rows.slice(0, maxRows)) {
+      breakdown[key] = slimResultRow(value.generalData || {}, goalNames);
+    }
+    variations[variationId] = { name: variationNames[variationId] ?? (variationId === '_reference' ? 'Original' : null), breakdown };
+  }
+
+  return {
+    experimentId: experiment.id,
+    experimentName: experiment.name,
+    type: experiment.type,
+    status: experiment.status,
+    dateStarted: experiment.dateStarted,
+    mainGoalId: experiment.mainGoalId,
+    request: body,
+    breakdownKeyNote: args.breakdown ? undefined : 'No breakdown requested: each variation has a single "_reference" row holding its totals.',
+    truncated: truncated ? `Some variations had more than ${maxRows} breakdown rows; raise maxRowsPerVariation or narrow start/end.` : undefined,
     variations
   };
 }
@@ -731,6 +839,7 @@ export async function handleKameleoonTool(name, rawArgs) {
   const run = async () => {
     if (name === 'list_kameleoon_experiments') return listExperiments(ListExperimentsSchema.parse(rawArgs || {}));
     if (name === 'get_kameleoon_code') return getCode(GetCodeSchema.parse(rawArgs || {}));
+    if (name === 'get_kameleoon_results') return getResults(GetResultsSchema.parse(rawArgs || {}));
     if (name === 'create_kameleoon_variation') return createVariation(CreateVariationSchema.parse(rawArgs || {}));
     if (name === 'push_variation_code') return pushVariationCode(PushVariationCodeSchema.parse(rawArgs || {}));
     if (name === 'create_kameleoon_goal') return createGoal(CreateGoalSchema.parse(rawArgs || {}));
