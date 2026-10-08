@@ -40,18 +40,19 @@ These live in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatic
 
 ## Memory
 
-Your persistent memory (in Claude Code, the auto-memory folder; its `MEMORY.md` index is loaded each session) holds findings, not rules. Manage it without being asked.
+Your persistent memory (in Claude Code, the auto-memory folder, indexed by `MEMORY.md`) holds findings, not rules. Manage it without being asked, and treat every line as a cost: it competes for attention in every later session.
 
-**Reuse.** Before working on a client, site, experiment or tool, scan the index for its name, sitecode or topic and read the matching notes. Past code for the same site is in `experiments/.archive/*/variation.js`; grep their `// Site: <host>` line. Verify a note against the live page or code before relying on it, and fix or delete it if it's wrong.
+**Reuse.** Before working on a client, site or tool, read the matching notes, and grep `experiments/.archive/*/variation.js` for its `// Site: <host>` line. Check a note against the live page or code before relying on it; fix or delete it if it's wrong.
 
-**When to consider saving:** at the end of an investigation or bug fix, after the user corrects you, or when something surprised you because you measured it.
+**Save** at the end of an investigation, after a correction, or after a measured surprise, and only if all of these hold:
+1. The Kameleoon docs (Mintlify MCP), an `AGENTS.md`, a skill and the code don't already cover it.
+2. Rediscovering it would cost real time.
+3. It would change what a future session does, not just describe what happened.
+4. It stays true, or it's dated.
 
-**Save only if all three hold:**
-1. It isn't already in the Kameleoon docs (search the Mintlify MCP), in an `AGENTS.md`, in a skill, or in the code or git history.
-2. Rediscovering it would cost real time: a measured client quirk, an app internal, a diagnostic pattern, a dead end.
-3. It will still be true next month, or carries a date when it may not be.
+**File it in the right place.** Strip the site's name, selectors and data. What still explains the fix is a mechanism: put it in the `variation-patterns` skill once it's understood or has been seen on a second site, and until then mark it "likely general" in the note. What's left is site-specific and goes in the client's note. Code is copied from code that ran, never rewritten: in the skill without client details, and in a note as a short snippet with its `.archive/<folder>` as source. A rule from the user goes in this file or a skill, proposed as an edit.
 
-**How:** update an existing note before creating one. Keep the measured facts with their date, link to the docs instead of restating them, and decide what's general before filing anything under a client. Take out the site's name, selectors and data: if what's left still explains the fix, it's a general mechanism; if it's the site's data or configuration, it's site-specific. Most findings are both, so split them. Promote a mechanism to the skill only when it's understood (framework or browser behaviour) or has been seen on a second site; otherwise mark it "likely general" in the note and promote it when it repeats. Keep code where it's found. A technique that would work on other sites goes in the `variation-patterns` skill, copied from code that ran and stripped of client details. A client-only trick goes in its note as a short snippet copied from code that ran (never rewritten from memory), with the archive folder (`experiments/.archive/<folder>`) as its source. Keep client names and sitecodes in memory, never in the repo. A general *rule* the user gives you belongs in this file or a skill (propose the edit), not in memory. When saving, tell the user in one line what you saved; when you skip something because it's already covered, say nothing.
+**Keep it small.** Update or shorten an existing note before adding one, prefer one sentence to a paragraph, and delete what's stale or duplicated whenever you touch a note. Say in one line what you saved; say nothing when you skip.
 
 ## Committing and pushing
 
