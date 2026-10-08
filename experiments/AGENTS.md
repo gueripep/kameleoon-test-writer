@@ -18,11 +18,11 @@ Rules for writing client A/B test variations in this folder. The bridge is assum
 
 ## Kameleoon API, not native APIs
 
-Wait for elements with `Kameleoon.API.Core.runWhenElementPresent()`, and use `Kameleoon.API.Utils` for timers and event listeners. Never use native `setTimeout`/`setInterval`/`addEventListener`, and never poll for elements yourself. Reading the DOM with `document.querySelector` inside a callback is fine, as in pattern B below.
+Wait for elements with `Kameleoon.API.Core.runWhenElementPresent()`, and use `Kameleoon.API.Utils` for timers and event listeners. Never use native `setTimeout`/`setInterval`/`addEventListener`, and never poll for elements yourself. Reading the DOM with `document.querySelector` inside a callback is fine.
 
 ## Hydration (React/SPA re-renders)
 
-Never use `runWhenElementPresent(..., null, true)` for this. Start with A, and move to B only after you have *observed* the change being overwritten.
+Never use `runWhenElementPresent(..., null, true)` for this. Start with A, and move on only after you have *observed* the change being overwritten.
 
 **A. Simple (default)**
 ```javascript
@@ -31,33 +31,15 @@ Kameleoon.API.Core.runWhenElementPresent(selector, (el) => {
 });
 ```
 
-**B. MutationObserver (only if A is measured to fail)**
-```javascript
-(() => {
-    const selector = 'your-selector';
-    const modifier = 'kam-modifier';
-    Kameleoon.API.Core.runWhenElementPresent(selector, () => {
-        const applyChange = () => {
-            const el = document.querySelector(`:is(${selector}):not(.${modifier})`);
-            if (!el) return;
-            el.classList.add(modifier);
-            // modifications
-        };
-        applyChange();
-        const observer = new MutationObserver(() => applyChange());
-        observer.observe(document.body, { childList: true, subtree: true });
-        Kameleoon.API.Utils.setTimeout(() => observer.disconnect(), 3000);
-    });
-})();
-```
+**B and beyond** (MutationObserver re-apply, CSS-only changes React can't strip) are in the `variation-patterns` skill. Use them only after A is measured to fail.
 
 ## Workflow
 
-1. **Discover**: Use `read_dom` and `get_interesting_elements` for structure, and verify every selector with `evaluate_js` before coding. Element lists can include hidden or hover-only elements, so screenshot first unless you already know the element is on screen.
+1. **Discover**: Verify every selector with `evaluate_js` before coding; `read_dom` and `get_interesting_elements` help map an unfamiliar page. Element lists can include hidden or hover-only elements, so screenshot first unless you already know the element is on screen.
 2. **Save**: Every save reloads the page and re-injects, so each check runs on a clean load.
 3. **Lint**: After every save to `variation.js`, run `npm run lint` and `npm run typecheck`. Fix what your change introduced. Report pre-existing problems without fixing them.
 4. **Audit**: Before calling a task done, take a screenshot with `capture_screenshot` and check for overlaps, clipping, stray borders and gradients, alignment, and different scroll states. Never save screenshots to disk.
-5. **Debug**: If something looks off, use `highlight_element` to check targets and `read_mutation_log` to see hydration overwrites. If tools time out, call `set_extension_enabled` with `enabled: true` and retry.
+5. **Debug**: When a change applies and then disappears, start with `read_mutation_log`: it shows what the site rewrote and when. Use `highlight_element` to check what a selector really targets. If tools time out, call `set_extension_enabled` with `enabled: true` and retry.
 6. **QA in the real engine**: The bridge injects at `document_start`, far earlier than Kameleoon. A bridge pass is a draft. Don't report a variation as working until the real engine ran it (see the `kameleoon-qa` skill), and say which one you checked.
 
 ## Fixing bugs: minimal and verified
