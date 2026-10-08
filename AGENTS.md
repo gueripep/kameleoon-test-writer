@@ -41,7 +41,7 @@ These live in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatic
 
 Your persistent memory (in Claude Code, the auto-memory folder; its `MEMORY.md` index is loaded each session) holds findings, not rules. Manage it without being asked.
 
-**Reuse.** Before working on a client, site, experiment or tool, scan the index for its name, sitecode or topic and read the matching notes. Verify a note against the live page or code before relying on it, and fix or delete it if it's wrong.
+**Reuse.** Before working on a client, site, experiment or tool, scan the index for its name, sitecode or topic and read the matching notes. Past code for the same site is in `experiments/.archive/*/variation.js`; grep their `// Site: <host>` line. Verify a note against the live page or code before relying on it, and fix or delete it if it's wrong.
 
 **When to consider saving:** at the end of an investigation or bug fix, after the user corrects you, or when something surprised you because you measured it.
 
@@ -50,7 +50,7 @@ Your persistent memory (in Claude Code, the auto-memory folder; its `MEMORY.md` 
 2. Rediscovering it would cost real time: a measured client quirk, an app internal, a diagnostic pattern, a dead end.
 3. It will still be true next month, or carries a date when it may not be.
 
-**How:** update an existing note before creating one. Keep the measured facts with their date, link to the docs instead of restating them, and keep client names and sitecodes in memory, never in the repo. A general *rule* the user gives you belongs in this file or a skill (propose the edit), not in memory. When saving, tell the user in one line what you saved; when you skip something because it's already covered, say nothing.
+**How:** update an existing note before creating one. Keep the measured facts with their date, link to the docs instead of restating them, and keep the code in its archive: when a note describes a technique that an archived variation implements, cite the folder (`experiments/.archive/<folder>`) and the file or selector to look at, instead of pasting code. Archive folders are never renamed or deleted, so the path is stable. Keep client names and sitecodes in memory, never in the repo. A general *rule* the user gives you belongs in this file or a skill (propose the edit), not in memory. When saving, tell the user in one line what you saved; when you skip something because it's already covered, say nothing.
 
 ## Committing and pushing
 
