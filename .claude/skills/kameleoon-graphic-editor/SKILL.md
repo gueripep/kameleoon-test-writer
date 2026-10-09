@@ -67,7 +67,8 @@ An HTML Content edit replaces the element's **entire** innerHTML, so include eve
 ## Rules that prevent the usual mess
 
 - From the docs: don't combine an HTML Content edit with other edits on its children, because child edits override the parent's. If a container's HTML is edited, reset any separate rows that target elements inside it and put everything into the one HTML edit.
-- Prefer editing text inside the existing component over "Add → text element". Added elements are positioned "above the page" in absolute page coordinates, so they drift off the component at other widths.
+- To change text, select the element that holds it (with a robust selector) and edit its Content section. Only when no element holds the text, add one and position it relative to a reference element inside the component; HTML Content is the last resort.
+- Added elements set "above the page" sit in absolute page coordinates and drift off the component at other widths. Place them before/after a reference element inside the component, so they also hide when it collapses.
 - After a long href is pasted twice, the href holds two URLs glued together. Check every `href` in `generatedJsCode` for a second `https://`.
 
 ## Checking the result
