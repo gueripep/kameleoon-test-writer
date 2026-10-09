@@ -64,6 +64,10 @@ The deliverable is the smallest change that fixes the reported symptom.
 - To see what a personalization or experiment in the app actually runs (graphic editor, widget, code editor, prompt or redirect), use `get_kameleoon_code`. The editor's settings (`widgetTemplateInput`) can disagree with the generated code, and the generated code is what runs.
 - For API and product questions, search the Kameleoon docs MCP (Mintlify, docs.kameleoon.com) before relying on memory. When a Kameleoon feature misbehaves (graphic editor, widgets, simulation), search its troubleshooting page *before* diagnosing: documented rules (e.g. child edits override a parent's HTML edit) explain many bugs outright. The docs don't cover app internals or timing, so measure those instead.
 
+## Tickets
+
+Every `.tickets/<folder>/Objective.md` you write or work on opens with a TL;DR right under the title: **Issue:** one sentence, **To do:** one to three short steps. Nothing else before it, and update it when the diagnosis changes.
+
 ## Archiving
 
 Past experiments live in `.archive/<date>-<name>/` (dot-prefixed so the watcher ignores them). Run these with the shell; there are no MCP tools for them:
