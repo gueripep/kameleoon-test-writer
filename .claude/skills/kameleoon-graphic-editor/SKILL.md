@@ -69,6 +69,11 @@ Added rows have no "Edit selector" link; their reference is changed through Move
 
 Check the result in `doc` (parent and siblings of `[data-kameleoon-key=<key>]`), then open the other states in navigation mode. Also switch the preview to Tablet and Phone: sites can rebuild components at other widths, and the reference selector can then match a different element.
 
+## Size fields and Custom CSS
+
+- The W/H fields only take numbers (not `auto` or empty) and compile to `width/height: Npx !important`, scoped to the current device's media query. A fixed W *and* H distorts an image as soon as the site resizes its container (e.g. a sticky header shrinking on scroll).
+- To keep proportions, set W, then put `height: auto;` in **CSS and Classes → Custom CSS** (Monaco; `executeEdits` works, then click outside it to apply). Write plain declarations inside the prefilled `[data-kameleoon-key=…] { }` block: the editor appends `!important` itself (writing your own gives an invalid `!important!important`), emits the block for every device, and places it after the W/H rule, so it wins.
+
 ## Edit HTML Content (last resort)
 
 With the element selected, open the right-panel section whose text is "HTML Content" (`div[role=button]`). The editor is Monaco:
