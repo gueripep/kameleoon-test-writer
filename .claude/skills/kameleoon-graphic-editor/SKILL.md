@@ -5,7 +5,7 @@ description: Read, fix or edit a variation inside the Kameleoon graphic editor t
 
 # Driving the graphic editor
 
-The target tab is the client site with the editor overlaid. Read what the variation does with `get_kameleoon_code` first, then work in the editor. Every change autosaves (header shows "Saved N min ago"), so look at a row before resetting or overwriting it.
+The target tab is the client site with the editor overlaid. Read what the variation does with `get_kameleoon_code` first, then work in the editor. Every change autosaves to a draft (header shows "Saved N min ago"), so look at a row before resetting or overwriting it. The campaign only changes when the user clicks **Save** on the setup page after **Continue** (it shows "N Unsaved change" and the content tagged "Unsaved" until then). Leave that Save to the user.
 
 ## Opening the editor
 
@@ -89,4 +89,4 @@ An HTML Content edit replaces the element's **entire** innerHTML, so include eve
 
 ## Checking the result
 
-After autosave, `get_kameleoon_code` kept returning the previous `generatedJsCode` (measured once; the docs don't say when it's rebuilt). Don't use it to confirm an editor change. Check the canvas in both modes, then a real simulation (`kameleoon-qa` skill) once the user has continued past the editor.
+`get_kameleoon_code` returns the saved campaign, so it shows the previous `generatedJsCode` until the setup-page Save. Don't use it to confirm an editor change before that. Check the canvas in both modes, then a real simulation (`kameleoon-qa` skill) once the user has continued past the editor.
