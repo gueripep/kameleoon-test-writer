@@ -178,7 +178,8 @@ const GetCodeSchema = z.object({
   personalizationId: z.number().optional().describe("Read every content (variation) of this personalization."),
   experimentId: z.number().optional().describe("Read every variation of this experiment, plus its experiment-level script if any."),
   variationId: z.number().optional().describe("Read a single variation / personalization content."),
-  maxCodeChars: z.number().optional().describe("Truncate each code field to this many characters (default 20000). Full lengths are always reported.")
+  maxCodeChars: z.number().optional().describe("Truncate each code field to this many characters (default 20000). Full lengths are always reported."),
+  snapshot: z.boolean().optional().describe("Also write the full, untruncated API response of each variation (and the campaign) to experiments/.snapshots/<kind>-<id>/<timestamp>/. Use before opening the graphic editor on an existing variation and after each setup-page Save: the editor keeps no history, and these files are what a lost draft is rebuilt from.")
 });
 
 const GetResultsSchema = z.object({
@@ -381,6 +382,16 @@ function slimVariationCode(variation, maxChars) {
   return out;
 }
 
+// One folder per call so a snapshot is the campaign's state at one moment; dot-prefixed so the watcher ignores it.
+async function writeSnapshot(subject, files) {
+  const dir = path.join(getWorkspacePath(), '.snapshots', subject, new Date().toISOString().replace(/[:.]/g, '-'));
+  await fs.mkdir(dir, { recursive: true });
+  for (const [name, data] of Object.entries(files)) {
+    await fs.writeFile(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2));
+  }
+  return { dir, files: Object.keys(files).map(name => `${name}.json`) };
+}
+
 async function getCode(args) {
   const given = ['personalizationId', 'experimentId', 'variationId'].filter(k => args[k] != null);
   if (given.length !== 1) throw new Error('Pass exactly one of personalizationId, experimentId or variationId.');
@@ -388,7 +399,9 @@ async function getCode(args) {
 
   if (args.variationId != null) {
     const { data } = await apiRequest('GET', `/variations/${args.variationId}`);
-    return { variations: [slimVariationCode(data, maxChars)] };
+    const result = { variations: [slimVariationCode(data, maxChars)] };
+    if (args.snapshot) result.snapshot = await writeSnapshot(`variation-${data.id}`, { [`variation-${data.id}`]: data });
+    return result;
   }
 
   const isPersonalization = args.personalizationId != null;
@@ -397,9 +410,11 @@ async function getCode(args) {
   const variationIds = (isPersonalization ? campaign.variationIds : campaign.variations) || [];
 
   const variations = [];
+  const raw = { campaign };
   for (const variationId of variationIds) {
     const { data } = await apiRequest('GET', `/variations/${variationId}`);
     variations.push(slimVariationCode(data, maxChars));
+    raw[`variation-${variationId}`] = data;
   }
 
   const campaignCode = {};
@@ -407,8 +422,10 @@ async function getCode(args) {
     if (!isBlank(campaign[field])) campaignCode[field] = truncateCode(campaign[field], maxChars);
   }
 
+  const kind = isPersonalization ? 'personalization' : 'experiment';
   return {
-    kind: isPersonalization ? 'personalization' : 'experiment',
+    ...(args.snapshot && { snapshot: await writeSnapshot(`${kind}-${campaign.id}`, raw) }),
+    kind,
     id: campaign.id,
     name: campaign.name,
     type: campaign.type,

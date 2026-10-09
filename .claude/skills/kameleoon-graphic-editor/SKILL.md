@@ -7,6 +7,12 @@ description: Read, fix or edit a variation inside the Kameleoon graphic editor t
 
 The target tab is the client site with the editor overlaid. Read what the variation does with `get_kameleoon_code` first, then work in the editor. Every change autosaves to a draft (header shows "Saved N min ago"), so look at a row before resetting or overwriting it. The campaign only changes when the user clicks **Save** on the setup page after **Continue** (it shows "N Unsaved change" and the content tagged "Unsaved" until then). Leave that Save to the user.
 
+## Snapshot first
+
+The editor keeps no history you can restore. A draft can empty itself on reload, and a Save from that state empties the campaign. Before opening the editor on an existing variation, and again after each setup-page Save, call `get_kameleoon_code` with `snapshot: true`. It writes the full API responses to `experiments/.snapshots/<kind>-<id>/<timestamp>/`. Restoring means rebuilding in the editor from that file: selectors, image URLs (including every srcset entry) and CSS values are all in `generatedJsCode`/`generatedCssCode`.
+
+When the work is saved, also write `EditorChanges.md` in the ticket folder: per change key, the selector, each setting changed and why, what was measured, and the final snapshot's path. The snapshot says what the code is; this file says what you changed and why.
+
 ## Opening the editor
 
 Open it on a variation with `open_url`, using the campaign's `baseURL` from `get_kameleoon_code`:
