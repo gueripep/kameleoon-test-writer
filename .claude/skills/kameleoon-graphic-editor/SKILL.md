@@ -7,6 +7,15 @@ description: Read, fix or edit a variation inside the Kameleoon graphic editor t
 
 The target tab is the client site with the editor overlaid. Read what the variation does with `get_kameleoon_code` first, then work in the editor. Every change autosaves (header shows "Saved N min ago"), so look at a row before resetting or overwriting it.
 
+## Opening the editor
+
+Open it on a variation with `open_url`, using the campaign's `baseURL` from `get_kameleoon_code`:
+
+- Experiment: `<baseURL>?kameleoon=true&kameleoonSelectedVariationId=<variationId>&experimentId=<id>&kameleoonReplica=false`
+- Personalization: `<baseURL>?kameleoon=true&kameleoonSelectedVariationId=<variationId>&personalizationId=<id>`
+
+Keep any query string the page itself needs; editor params are just appended to it.
+
 ## Where things are
 
 - **Editor UI** (header, left Elements list, right Design panel) is in the top `document`. `click_element` works on it.
