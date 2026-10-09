@@ -1,6 +1,6 @@
 ---
 name: kameleoon-graphic-editor
-description: Read, fix or edit a variation inside the Kameleoon graphic editor through the bridge — map the Elements list to change keys, reset a change, edit an element's HTML Content, click through carousels/menus in the canvas. Use when the target tab is a graphic editor (URL has `kameleoonSelectedVariationId=` and `kameleoon=true`) or the user asks to change something "in the editor".
+description: Read, fix or edit a variation inside the Kameleoon graphic editor through the bridge — map the Elements list to change keys, reset a change, edit text (Content section, move an added element next to a reference, HTML Content as last resort), click through carousels/menus in the canvas. Use when the target tab is a graphic editor (URL has `kameleoonSelectedVariationId=` and `kameleoon=true`) or the user asks to change something "in the editor".
 ---
 
 # Driving the graphic editor
@@ -51,7 +51,23 @@ Tag the row you want (`lis[i].id = 'kam-row'`) so `click_element` has a stable s
 - **Select:** click `#kam-row ._main_1x8qr_37`. The row expands with its CSS selector and an "Edit selector" link, and the right panel shows its Design sections.
 - **Reset:** the small row button `#kam-row button._button_4s3b1_1` resets immediately. It isn't a menu. The row turns into "Reset? Yes / No", and `button[title="Yes"]` removes every change on that element. Confirm the key first.
 
-## Edit HTML Content
+## Editing text: the order to try
+
+1. **Element that holds the text:** select it and edit its **Content** section.
+2. **No element holds it** (e.g. a slide with no description `<p>`): use an added text element placed **next to a reference element inside the component**, so it moves and hides with it.
+3. **HTML Content:** last resort. It rewrites the whole container and clashes with child edits.
+
+## Move an added element
+
+Added rows have no "Edit selector" link; their reference is changed through Move. Select the element, click **Move** (✥) in the toolbar over it, and the right panel shows "Move element":
+
+- **Next to another element** → **Before / Replace / After**, plus a "Move element" selector field for the reference (it shows "N matching element").
+- Paste the reference selector, check the canvas highlight jumped to that element, then **Validate**. On the first try the old reference was kept; re-open Move and check the field if the element didn't move.
+- Example that fixed a sentence left visible when its carousel slide collapsed: reference = the slide's button box, **Before**, which put it inside the box that collapses.
+
+Check the result in `doc` (parent and siblings of `[data-kameleoon-key=<key>]`), then open the other states in navigation mode. Also switch the preview to Tablet and Phone: sites can rebuild components at other widths, and the reference selector can then match a different element.
+
+## Edit HTML Content (last resort)
 
 With the element selected, open the right-panel section whose text is "HTML Content" (`div[role=button]`). The editor is Monaco:
 
@@ -67,7 +83,6 @@ An HTML Content edit replaces the element's **entire** innerHTML, so include eve
 ## Rules that prevent the usual mess
 
 - From the docs: don't combine an HTML Content edit with other edits on its children, because child edits override the parent's. If a container's HTML is edited, reset any separate rows that target elements inside it and put everything into the one HTML edit.
-- To change text, select the element that holds it (with a robust selector) and edit its Content section. Only when no element holds the text, add one and position it relative to a reference element inside the component; HTML Content is the last resort.
 - Added elements set "above the page" sit in absolute page coordinates and drift off the component at other widths. Place them before/after a reference element inside the component, so they also hide when it collapses.
 - After a long href is pasted twice, the href holds two URLs glued together. Check every `href` in `generatedJsCode` for a second `https://`.
 
