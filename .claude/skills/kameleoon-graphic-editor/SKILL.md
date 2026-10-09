@@ -63,7 +63,8 @@ Added rows have no "Edit selector" link; their reference is changed through Move
 
 - **Next to another element** → **Before / Replace / After**, plus a "Move element" selector field for the reference (it shows "N matching element").
 - Paste the reference selector, check the canvas highlight jumped to that element, then **Validate**. On the first try the old reference was kept; re-open Move and check the field if the element didn't move.
-- Through the bridge: Move is the second button in the toolbar (`li._list__item_18ueu_61 > button`, index 1). Set `input[placeholder="Type reference selector"]` with the native `value` setter plus an `input` event, click the label whose text is "Before", check "1 matching element", then click the "Validate" button.
+- Through the bridge: Move is the second button in the toolbar (`li._list__item_18ueu_61 > button`, index 1). The panel opens with an empty field and **After** selected every time. Set `input[placeholder="Type reference selector"]` with the native `value` setter plus an `input` event, *then* click the label whose text is "Before", and confirm it took by reading `checked` from the label's React fiber (the DOM radio's `checked` stays false). Only then click "Validate". Twice the element landed After when Before looked selected but wasn't in React state.
+- If the row won't select (row class has `_other-item_`) and real clicks on the canvas don't select either, ask the user to click the element in the preview; the toolbar then appears for you.
 - Example that fixed a sentence left visible when its carousel slide collapsed: reference = the slide's button box, **Before**, which put it inside the box that collapses.
 
 Check the result in `doc` (parent and siblings of `[data-kameleoon-key=<key>]`), then open the other states in navigation mode. Also switch the preview to Tablet and Phone: sites can rebuild components at other widths, and the reference selector can then match a different element.
