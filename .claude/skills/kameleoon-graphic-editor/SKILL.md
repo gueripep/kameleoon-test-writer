@@ -74,6 +74,10 @@ Check the result in `doc` (parent and siblings of `[data-kameleoon-key=<key>]`),
 - The W/H fields only take numbers (not `auto` or empty) and compile to `width/height: Npx !important`, scoped to the current device's media query. A fixed W *and* H distorts an image as soon as the site resizes its container (e.g. a sticky header shrinking on scroll).
 - To keep proportions, set W, then put `height: auto;` in **CSS and Classes → Custom CSS** (Monaco; `executeEdits` works, then click outside it to apply). Write plain declarations inside the prefilled `[data-kameleoon-key=…] { }` block: the editor appends `!important` itself (writing your own gives an invalid `!important!important`), emits the block for every device, and places it after the W/H rule, so it wins.
 
+## Image srcset
+
+Replacing an image's Source can leave entries under **Add image sizes** pointing at the site's original file. A retina screen picks the largest one (`sizes` × DPR), so check every entry. The entry fields commit on React `onBlur`: set the value with the native setter plus an `input` event, then call the input's `__reactProps$…` `onKeyDown` (Enter) and `onBlur` directly. A native `blur()` updated the field but not the canvas.
+
 ## Edit HTML Content (last resort)
 
 With the element selected, open the right-panel section whose text is "HTML Content" (`div[role=button]`). The editor is Monaco:
